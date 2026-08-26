@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API: Debug (uvicorn, no reload)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["src.app:app", "--host", "127.0.0.1", "--port", "8000"],
+      "jinja": true,
+      "justMyCode": false,
+      "env": {
+        "DB_ECHO": "true"
+      },
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "API: Debug (uvicorn, with reload)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["src.app:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
+      "jinja": true,
+      "justMyCode": false,
+      "env": {
+        "DB_ECHO": "true"
+      },
+      "cwd": "${workspaceFolder}",
+      "presentation": {
+        "hidden": false
+      }
+    },
+    {
+      "name": "Tests: Debug test_suite.py",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "unittest",
+      "args": ["tests.test_suite", "-v"],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

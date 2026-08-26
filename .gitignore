@@ -30,7 +30,8 @@ htmlcov/
 test_suite.db
 
 # --- IDE / editor ---
-.vscode/
+.vscode/*
+!.vscode/launch.json
 .idea/
 *.swp
 
