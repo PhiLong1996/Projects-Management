@@ -32,6 +32,7 @@ test_suite.db
 # --- IDE / editor ---
 .vscode/*
 !.vscode/launch.json
+!.vscode/settings.json
 .idea/
 *.swp
 
