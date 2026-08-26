@@ -1,0 +1,17 @@
+fastapi==0.141.1
+starlette==1.0.0
+uvicorn[standard]==0.46.0
+sqlalchemy==2.0.52
+alembic==1.19.1
+asyncpg==0.31.0
+aiosqlite==0.22.1
+greenlet==3.4.0
+pydantic==2.13.3
+pydantic-settings==2.14.0
+email-validator==2.3.0
+passlib==1.7.4
+# NOTE: passlib 1.7.4's bcrypt backend self-test breaks on bcrypt>=4.1
+# (ValueError: password cannot be longer than 72 bytes). Pin bcrypt<4.1.
+bcrypt==4.0.1
+PyJWT==2.12.1
+python-multipart==0.0.26
