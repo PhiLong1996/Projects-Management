@@ -14,6 +14,7 @@ SECRET_KEY = settings.secret_key if hasattr(settings, "secret_key") else "supers
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
+PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = 30
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)

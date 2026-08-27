@@ -9,6 +9,8 @@ from src.modules.auth.schemas import (
     LoginRequest,
     RefreshTokenRequest,
     ChangePasswordRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
     TokenResponse,
 )
 
@@ -44,3 +46,15 @@ async def change_password(
     current_user: User = Depends(get_current_user),
 ):
     return await service.change_password(db, current_user, payload)
+
+
+@router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)
+async def forgot_password(payload: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    # Always 204 regardless of whether the email exists — see
+    # service.forgot_password's docstring for why.
+    await service.forgot_password(db, payload.email)
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(payload: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    await service.reset_password(db, payload.token, payload.new_password)

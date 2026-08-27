@@ -12,8 +12,10 @@ Run with:
     python -m unittest tests.test_suite -v
 """
 import os
+import re
 import sys
 import unittest
+from unittest.mock import patch
 
 # Ensure project root is importable and tests use an isolated sqlite DB.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -170,6 +172,98 @@ class TestAuthentication(BaseAPITestCase):
         self.assertEqual(r3.status_code, 401)
         r4 = self.login("pwtest@example.com", "NewPassword1")
         self.assertEqual(r4.status_code, 200)
+
+
+class TestForgotPassword(BaseAPITestCase):
+    """Uses a dedicated per-test user (never the shared admin fixture) since
+    these tests change the user's password and revoke their sessions —
+    doing that to the shared admin account would break every other test
+    class that logs in as admin@example.com."""
+
+    def setUp(self):
+        admin_token = self.login("admin@example.com", "Admin@123").json()["access_token"]
+        self.admin_headers = self.auth_headers(admin_token)
+        self.suffix = str(id(self))
+        self.email = f"forgot{self.suffix}@example.com"
+        self.create_user(self.admin_headers, self.email, "Forgot Pw", "TEAM_MEMBER", password="Password1")
+
+    def _request_reset_and_capture_token(self, email):
+        """POSTs /auth/forgot-password with send_email mocked out, and
+        extracts the reset token from the link embedded in the email body
+        (there's no real mail provider in tests — see src/core/email.py's
+        dev fallback)."""
+        captured = {}
+
+        async def fake_send_email(to, subject, body):
+            captured["to"] = to
+            captured["subject"] = subject
+            captured["body"] = body
+
+        with patch("src.modules.auth.service.send_email", side_effect=fake_send_email):
+            r = self.client.post("/api/v1/auth/forgot-password", json={"email": email})
+        return r, captured
+
+    def test_forgot_password_unknown_email_still_returns_204(self):
+        # AC-01-style uniform response: must not reveal whether the email exists.
+        r, captured = self._request_reset_and_capture_token("nobody-at-all@example.com")
+        self.assertEqual(r.status_code, 204, r.text)
+        self.assertEqual(captured, {})  # no email should have been sent
+
+    def test_forgot_password_and_reset_flow(self):
+        r, captured = self._request_reset_and_capture_token(self.email)
+        self.assertEqual(r.status_code, 204, r.text)
+        self.assertEqual(captured.get("to"), self.email)
+
+        match = re.search(r"token=(\S+)", captured["body"])
+        self.assertIsNotNone(match, captured.get("body"))
+        token = match.group(1)
+
+        r2 = self.client.post(
+            "/api/v1/auth/reset-password",
+            json={"token": token, "new_password": "BrandNewPassword1"},
+        )
+        self.assertEqual(r2.status_code, 204, r2.text)
+
+        # Old password rejected, new password works
+        self.assertEqual(self.login(self.email, "Password1").status_code, 401)
+        self.assertEqual(self.login(self.email, "BrandNewPassword1").status_code, 200)
+
+    def test_reset_token_cannot_be_reused(self):
+        _, captured = self._request_reset_and_capture_token(self.email)
+        token = re.search(r"token=(\S+)", captured["body"]).group(1)
+
+        r1 = self.client.post(
+            "/api/v1/auth/reset-password", json={"token": token, "new_password": "FirstNewPassword1"}
+        )
+        self.assertEqual(r1.status_code, 204, r1.text)
+
+        r2 = self.client.post(
+            "/api/v1/auth/reset-password", json={"token": token, "new_password": "SecondNewPassword1"}
+        )
+        self.assertEqual(r2.status_code, 400)
+
+    def test_reset_with_garbage_token_rejected(self):
+        r = self.client.post(
+            "/api/v1/auth/reset-password",
+            json={"token": "this-is-not-a-real-token", "new_password": "SomePassword1"},
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_reset_password_revokes_existing_sessions(self):
+        login_resp = self.login(self.email, "Password1").json()
+        refresh_token = login_resp["refresh_token"]
+
+        _, captured = self._request_reset_and_capture_token(self.email)
+        token = re.search(r"token=(\S+)", captured["body"]).group(1)
+
+        r = self.client.post(
+            "/api/v1/auth/reset-password", json={"token": token, "new_password": "AnotherNewPassword1"}
+        )
+        self.assertEqual(r.status_code, 204, r.text)
+
+        # The refresh token from before the reset must no longer work.
+        r2 = self.client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+        self.assertEqual(r2.status_code, 401)
 
 
 class TestProjectAndSprint(BaseAPITestCase):

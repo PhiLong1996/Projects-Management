@@ -18,6 +18,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import get_settings
+from src.core.email import send_email
 from src.core.security import (
     verify_password,
     hash_password,
@@ -26,8 +28,9 @@ from src.core.security import (
     hash_token,
     ACCESS_TOKEN_EXPIRE_MINUTES,
     REFRESH_TOKEN_EXPIRE_DAYS,
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES,
 )
-from src.modules.auth.models import RefreshToken
+from src.modules.auth.models import RefreshToken, PasswordResetToken
 from src.modules.auth.schemas import ChangePasswordRequest, TokenResponse
 from src.modules.users.models import User, UserStatus
 
@@ -169,3 +172,77 @@ async def change_password(db: AsyncSession, current_user: User, payload: ChangeP
 
     await db.commit()
     return {"message": "Password changed successfully. Active sessions invalidated."}
+
+
+async def forgot_password(db: AsyncSession, email: str) -> None:
+    """Start a password reset: email a one-time reset link if the account
+    exists. Always succeeds from the caller's point of view — same
+    uniform-response principle as login's "don't reveal whether the email
+    exists" (AC-01) — so this never leaks account existence or status via
+    response differences, and the router always returns 204 regardless of
+    what happened here.
+    """
+    normalized_email = email.strip().lower()
+    result = await db.execute(select(User).where(User.email == normalized_email))
+    user = result.scalar_one_or_none()
+
+    # No account, or a locked account: silently do nothing rather than
+    # erroring — a 404/403 here would let an attacker enumerate emails or
+    # account status by watching the response.
+    if not user or user.status == UserStatus.LOCKED:
+        return
+
+    raw_token = generate_refresh_token()  # reused: same opaque-token generator as refresh tokens
+    db.add(
+        PasswordResetToken(
+            user_id=user.id,
+            token_hash=hash_token(raw_token),
+            expires_at=datetime.utcnow() + timedelta(minutes=PASSWORD_RESET_TOKEN_EXPIRE_MINUTES),
+        )
+    )
+    await db.commit()
+
+    settings = get_settings()
+    reset_link = f"{settings.frontend_url.rstrip('/')}/reset-password?token={raw_token}"
+    await send_email(
+        to=user.email,
+        subject="Reset your password",
+        body=(
+            f"Hi {user.full_name},\n\n"
+            "We received a request to reset your password. This link is valid for "
+            f"{PASSWORD_RESET_TOKEN_EXPIRE_MINUTES} minutes:\n\n"
+            f"{reset_link}\n\n"
+            "If you didn't request this, you can safely ignore this email — "
+            "your password will not be changed."
+        ),
+    )
+
+
+async def reset_password(db: AsyncSession, token: str, new_password: str) -> None:
+    """Complete a password reset using the token emailed by forgot_password."""
+    invalid_token_exception = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid or expired reset token",
+    )
+
+    result = await db.execute(
+        select(PasswordResetToken).where(PasswordResetToken.token_hash == hash_token(token))
+    )
+    record = result.scalar_one_or_none()
+
+    if not record or record.is_used or record.expires_at < datetime.utcnow():
+        raise invalid_token_exception
+
+    user_result = await db.execute(select(User).where(User.id == record.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user or user.status == UserStatus.LOCKED:
+        raise invalid_token_exception
+
+    user.password_hash = hash_password(new_password)
+    record.used_at = datetime.utcnow()
+
+    # Same policy as change_password: a password reset should invalidate
+    # every existing session, not just future logins.
+    await _revoke_all_sessions(db, user.id)
+
+    await db.commit()

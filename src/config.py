@@ -16,6 +16,23 @@ class Settings(BaseSettings):
     admin_email: str = "admin@example.com"
     admin_password: str = "Admin@123"
 
+    # --- Outbound email (forgot-password) ---
+    # Left blank by default: with no SMTP host/user/password configured,
+    # src/core/email.py logs the email instead of sending it, so the
+    # forgot-password flow works out of the box for local dev/testing.
+    # Set these in .env to send real emails once you have SMTP credentials
+    # (Gmail app password, SendGrid, Mailtrap, etc.) — no code changes needed.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""  # defaults to smtp_user if unset
+    smtp_use_tls: bool = True
+    # Used to build the password-reset link emailed to the user
+    # (<frontend_url>/reset-password?token=...). Point this at wherever the
+    # frontend's reset-password page actually lives.
+    frontend_url: str = "http://localhost:3000"
+
     max_file_size_bytes: int = 10 * 1024 * 1024
 
     allowed_mime_types: Set[str] = {

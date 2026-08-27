@@ -142,6 +142,10 @@ doesn't reproduce against SQLite locally).
 | `SECRET_KEY` | — | JWT signing key. Use a random value ≥ 32 bytes in any real environment. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@example.com` / `Admin@123` | Seeded only if the `users` table is empty |
 | `DB_ECHO` | `false` | Set `true` to log SQL statements while debugging |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | unset | Outbound email for forgot-password. Left blank, emails are logged instead of sent (see §7). |
+| `SMTP_FROM` | `SMTP_USER` | "From" address on sent emails, if different from the login user |
+| `SMTP_USE_TLS` | `true` | STARTTLS on connect |
+| `FRONTEND_URL` | `http://localhost:3000` | Base URL used to build the password-reset link emailed to users |
 
 Unrecognized keys in `.env` are ignored rather than crashing startup.
 
@@ -157,8 +161,32 @@ Unrecognized keys in `.env` are ignored rather than crashing startup.
   expired, as long as the refresh token (7 day) is still valid.
 - `POST /api/v1/auth/change-password` — requires the current password and
   revokes all existing refresh sessions.
+- `POST /api/v1/auth/forgot-password` — takes `email`. Always returns `204`
+  regardless of whether the email exists or the account is locked (same
+  uniform-response principle as login), so this endpoint can never be used
+  to enumerate accounts. If the account exists and is active, a one-time
+  reset link valid for 30 minutes is emailed (see below).
+- `POST /api/v1/auth/reset-password` — takes `token` (from the emailed
+  link) and `new_password`. Consumes the token (a second use returns `400`),
+  and — like `change-password` — revokes every existing session on success.
 
 Send `Authorization: Bearer <access_token>` on all protected endpoints.
+
+### Forgot password / email
+
+`PasswordResetToken` follows the exact same pattern as refresh tokens: an
+opaque random token (`secrets.token_urlsafe(48)`) is emailed to the user,
+only its SHA-256 hash is stored (`password_reset_tokens.token_hash`), and
+`used_at` (nullable, set once consumed) prevents replay.
+
+Email sending lives in `src/core/email.py`. **With no `SMTP_*` settings in
+`.env`, the email is logged/printed instead of sent** — this is intentional,
+not a stub: it means the forgot-password flow is fully testable locally
+(see `TestForgotPassword` in `tests/test_suite.py`, which captures the
+logged email to extract the reset token) without needing a real mail
+provider. Add real SMTP credentials (Gmail app password, SendGrid,
+Mailtrap, etc.) to `.env` to send actual emails — no code changes needed,
+same `send_email()` call either way.
 
 ### Refresh token format & storage
 
