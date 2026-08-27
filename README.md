@@ -195,7 +195,39 @@ the spec — e.g. Team Members may only update `status`, `description`, and
 `actual_hours` on tasks assigned to them, and task status changes follow a
 fixed transition table (`409 INVALID_STATUS_TRANSITION` on an invalid move).
 
-## 9. Notifications
+## 9. Search, Filter, Sort & Pagination (FR-07)
+
+Project, Task, and User listing all share the same search contract — one
+paginated response envelope and one `sort_by` convention, via
+`src/core/schemas.py` (`PaginatedResponse`/`PaginationMeta`) and
+`src/core/pagination.py` (`parse_sort`):
+
+```json
+{
+  "items": [ ... ],
+  "pagination": { "page": 1, "page_size": 20, "total_items": 42, "total_pages": 3 }
+}
+```
+
+- `GET /api/v1/projects` — `search` (name or code), `status` filter, `sort_by`,
+  `page`, `page_size`. Scoped per AC-03: Admin sees every project, everyone
+  else only projects they're an active member of.
+- `GET /api/v1/projects/{project_id}/tasks` — `sprint_id`, `assignee_id`,
+  `status`, `priority` filters, `search` (title or description), `sort_by`,
+  `page`, `page_size` (AC-08).
+- `GET /api/v1/users` — `search` (name or email), `status`/`role` filters,
+  `sort_by`, `page`, `page_size`. Scoped so non-Admins only see users who
+  share a project with them (plus themselves).
+
+`sort_by` takes a bare field name (defaults to descending) or a field name
+prefixed with `-` (descending) or `+` (ascending), e.g. `sort_by=-created_at`
+or `sort_by=+name`. Each endpoint validates the field against its own
+allowlist (`PROJECT_SORT_ALLOWLIST`, `SEARCH_SORT_ALLOWLIST`,
+`USER_SORT_ALLOWLIST` in each module's `service.py`) and returns
+`422 Unprocessable Entity` for an unknown field, so a typo doesn't silently
+fall back to some default. `page_size` is capped at 100.
+
+## 10. Notifications
 
 In-app notifications only (MVP). Triggered on task assignment/reassignment,
 status changes, priority/due-date updates, new comments, and project member
@@ -210,14 +242,14 @@ python -m src.jobs.check_deadlines
 Notifications are deduplicated via `deduplication_key`, so re-running the job
 does not create duplicate entries.
 
-## 10. Reporting
+## 11. Reporting
 
 `GET /api/v1/reports/tasks/csv` — CSV export of tasks, filterable by
 `project_id`, `sprint_id`, `status`, `priority`. Administrators see all
 projects; Project Managers see only projects they manage; Team Members
 receive `403 Forbidden`.
 
-## 11. Tests
+## 12. Tests
 
 ```bash
 pip install -r requirements.txt
@@ -231,14 +263,14 @@ permission restrictions, dashboard/reporting permission boundaries, and
 notification scoping. Tests run against an isolated SQLite file
 (`test_suite.db`, recreated on each run) — no external database required.
 
-## 12. API Documentation
+## 13. API Documentation
 
 Interactive OpenAPI docs are served at `/docs` (Swagger) and `/redoc` once the
 app is running. See Section 14 of the requirement spec for representative
 request/response payloads (login, create project, create task, status
 update, task list, project dashboard, standard error shape).
 
-## 13. Known Scope Limits (MVP)
+## 14. Known Scope Limits (MVP)
 
 Per Section 10.2 of the spec, the following are explicitly out of MVP scope
 and not implemented: email/WebSocket notification delivery, PDF export,

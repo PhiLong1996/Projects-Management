@@ -1,17 +1,30 @@
 """Business logic for project management and project membership."""
+import math
 import uuid
-from typing import List
+from typing import Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func, or_, asc, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.pagination import parse_sort
+from src.core.schemas import PaginationMeta
 from src.modules.notifications.service import create_event_notification
 from src.modules.notifications.models import NotificationType
 from src.modules.users.models import User, SystemRole, UserStatus
 from src.modules.projects.models import Project, ProjectMember, ProjectRole, ProjectStatus
 from src.modules.projects.schemas import ProjectCreate, ProjectUpdate, AddMemberRequest, RemoveMemberRequest
 from src.modules.tasks.models import Task, TaskStatus
+
+# spec FR-07: Project search supports filter (status), sort, and pagination.
+PROJECT_SORT_ALLOWLIST = {
+    "code": Project.code,
+    "name": Project.name,
+    "status": Project.status,
+    "start_date": Project.start_date,
+    "end_date": Project.end_date,
+    "created_at": Project.created_at,
+}
 
 
 async def verify_pm_or_admin(project_id: uuid.UUID, user: User, db: AsyncSession) -> None:
@@ -69,20 +82,67 @@ async def create_project(db: AsyncSession, current_user: User, payload: ProjectC
     return project
 
 
-async def list_projects(db: AsyncSession, current_user: User) -> List[Project]:
-    # AC-03: Administrator views all; other roles only see projects they participate in
-    if current_user.system_role == SystemRole.ADMIN:
-        result = await db.execute(select(Project))
-    else:
-        result = await db.execute(
-            select(Project)
-            .join(ProjectMember, Project.id == ProjectMember.project_id)
-            .where(
-                ProjectMember.user_id == current_user.id,
-                ProjectMember.is_active == True,
+async def list_projects(
+    db: AsyncSession,
+    current_user: User,
+    search: Optional[str],
+    status_filter: Optional[ProjectStatus],
+    sort_by: str,
+    page: int,
+    page_size: int,
+) -> dict:
+    """FR-07: search/filter/sort/paginate projects.
+
+    AC-03 scoping still applies underneath: Administrator sees every
+    project; everyone else only sees projects they're an active member of.
+    """
+    query = select(Project)
+    if current_user.system_role != SystemRole.ADMIN:
+        query = query.join(ProjectMember, Project.id == ProjectMember.project_id).where(
+            ProjectMember.user_id == current_user.id,
+            ProjectMember.is_active == True,
+        )
+
+    if status_filter:
+        query = query.where(Project.status == status_filter)
+    if search:
+        search_pattern = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Project.name.ilike(search_pattern),
+                Project.code.ilike(search_pattern),
             )
         )
-    return result.scalars().all()
+
+    field_name, order = parse_sort(sort_by)
+    if field_name not in PROJECT_SORT_ALLOWLIST:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid sort field '{sort_by}'. Allowed fields: {list(PROJECT_SORT_ALLOWLIST.keys())}",
+        )
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total_items = (await db.execute(count_query)).scalar() or 0
+
+    sort_column = PROJECT_SORT_ALLOWLIST[field_name]
+    direction = desc if order == "desc" else asc
+    query = query.order_by(direction(sort_column))
+
+    offset = (page - 1) * page_size
+    result = await db.execute(query.offset(offset).limit(page_size))
+    projects = result.scalars().all()
+
+    total_pages = math.ceil(total_items / page_size) if total_items > 0 else 0
+
+    return {
+        "items": projects,
+        "pagination": PaginationMeta(
+            page=page,
+            page_size=page_size,
+            total_items=total_items,
+            total_pages=total_pages,
+        ),
+    }
 
 
 async def update_project(

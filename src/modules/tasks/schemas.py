@@ -1,10 +1,14 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List, Generic, TypeVar
+from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 from src.modules.tasks.models import TaskPriority, TaskStatus
-
-T = TypeVar("T")
+# Re-exported for existing `from src.modules.tasks.schemas import
+# PaginationMeta, PaginatedResponse` call sites (tasks/service.py,
+# tasks/search_router.py) — the actual definitions now live in
+# src.core.schemas so Project/Task/User search (spec FR-07) share one
+# implementation instead of each module inventing its own.
+from src.core.schemas import PaginationMeta, PaginatedResponse  # noqa: F401
 
 
 def _normalize_to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -126,18 +130,6 @@ class AttachmentResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class PaginationMeta(BaseModel):
-    page: int
-    page_size: int
-    total_items: int
-    total_pages: int
-
-
-class PaginatedResponse(BaseModel, Generic[T]):
-    items: List[T]
-    pagination: PaginationMeta
 
 
 class TaskStatusUpdatePayload(BaseModel):

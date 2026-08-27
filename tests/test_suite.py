@@ -535,5 +535,121 @@ class TestNotificationScoping(BaseAPITestCase):
         self.assertTrue(all(item["recipient_id"] == pm["id"] for item in r_pm.json()["items"]))
 
 
+class TestProjectAndUserSearch(BaseAPITestCase):
+    """FR-07: Project and User search must support filter, sort, and
+    pagination — the same guarantees Task search already had."""
+
+    def setUp(self):
+        admin_token = self.login("admin@example.com", "Admin@123").json()["access_token"]
+        self.admin_headers = self.auth_headers(admin_token)
+        self.suffix = str(id(self))
+
+        self.pm = self.create_user(
+            self.admin_headers,
+            f"searchpm{self.suffix}@example.com",
+            f"Search PM {self.suffix}",
+            "PROJECT_MANAGER",
+        )
+        self.pm_headers = self.auth_headers(
+            self.login(self.pm["email"], "Password1").json()["access_token"]
+        )
+
+        # Two projects owned/managed by the same PM: one PLANNING, one CLOSED,
+        # with distinguishable codes/names for search-pattern matching.
+        self.proj_alpha = self.client.post(
+            "/api/v1/projects",
+            json={"code": f"ALPHA{self.suffix}", "name": f"Alpha Rollout {self.suffix}"},
+            headers=self.pm_headers,
+        ).json()
+        self.proj_beta = self.client.post(
+            "/api/v1/projects",
+            json={"code": f"BETA{self.suffix}", "name": f"Beta Rollout {self.suffix}"},
+            headers=self.pm_headers,
+        ).json()
+        r = self.client.patch(
+            f"/api/v1/projects/{self.proj_beta['id']}", json={"status": "CLOSED"}, headers=self.pm_headers
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def test_project_search_by_name_or_code(self):
+        r = self.client.get(
+            "/api/v1/projects", params={"search": f"Alpha Rollout {self.suffix}"}, headers=self.pm_headers
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        codes = [p["code"] for p in r.json()["items"]]
+        self.assertIn(self.proj_alpha["code"], codes)
+        self.assertNotIn(self.proj_beta["code"], codes)
+
+    def test_project_filter_by_status(self):
+        r = self.client.get("/api/v1/projects", params={"status": "CLOSED"}, headers=self.pm_headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        codes = [p["code"] for p in r.json()["items"]]
+        self.assertIn(self.proj_beta["code"], codes)
+        self.assertNotIn(self.proj_alpha["code"], codes)
+
+    def test_project_sort_by_code_ascending(self):
+        r = self.client.get(
+            "/api/v1/projects",
+            params={"search": self.suffix, "sort_by": "+code"},
+            headers=self.pm_headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        codes = [p["code"] for p in r.json()["items"]]
+        self.assertEqual(codes, sorted(codes))
+
+    def test_project_pagination(self):
+        r = self.client.get(
+            "/api/v1/projects",
+            params={"search": self.suffix, "page": 1, "page_size": 1},
+            headers=self.pm_headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(len(body["items"]), 1)
+        self.assertEqual(body["pagination"]["page"], 1)
+        self.assertEqual(body["pagination"]["page_size"], 1)
+        self.assertGreaterEqual(body["pagination"]["total_items"], 2)
+        self.assertGreaterEqual(body["pagination"]["total_pages"], 2)
+
+    def test_project_invalid_sort_field_rejected(self):
+        r = self.client.get(
+            "/api/v1/projects", params={"sort_by": "not_a_real_field"}, headers=self.pm_headers
+        )
+        self.assertEqual(r.status_code, 422)
+
+    def test_user_search_by_name_or_email(self):
+        r = self.client.get(
+            "/api/v1/users", params={"search": f"Search PM {self.suffix}"}, headers=self.admin_headers
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(any(u["id"] == self.pm["id"] for u in r.json()["items"]))
+
+    def test_user_filter_by_role(self):
+        r = self.client.get(
+            "/api/v1/users",
+            params={"role": "PROJECT_MANAGER", "search": self.suffix},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(all(u["system_role"] == "PROJECT_MANAGER" for u in r.json()["items"]))
+        self.assertTrue(any(u["id"] == self.pm["id"] for u in r.json()["items"]))
+
+    def test_user_pagination(self):
+        r = self.client.get(
+            "/api/v1/users", params={"page": 1, "page_size": 1}, headers=self.admin_headers
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(len(body["items"]), 1)
+        self.assertEqual(body["pagination"]["page_size"], 1)
+        self.assertGreaterEqual(body["pagination"]["total_items"], 2)  # at least admin + this PM
+
+    def test_user_invalid_sort_field_rejected(self):
+        r = self.client.get(
+            "/api/v1/users", params={"sort_by": "password_hash"}, headers=self.admin_headers
+        )
+        self.assertEqual(r.status_code, 422)
+
+
 if __name__ == "__main__":
     unittest.main()

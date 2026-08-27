@@ -1,0 +1,47 @@
+taskmanagementproject/
+├── .env
+├── .gitignore
+├── README.md
+├── pyproject.toml / requirements.txt
+└── src/
+    ├── __init__.py
+    ├── main.py                   # FastAPI app initialization & global middlewares
+    ├── config.py                 # Pydantic Settings configuration
+    ├── database.py               # DB engine, session creation, Base model
+    │
+    ├── core/                     # Cross-cutting concerns
+    │   ├── security.py           # Password hashing, JWT creation/validation
+    │   └── dependencies.py       # Global FastAPI dependencies (e.g., get_current_user)
+    │
+    ├── common/                   # Shared utility logic
+    │   └── exceptions.py         # Custom error handlers (e.g., NotFoundException)
+    │
+    └── modules/                  # Feature domain modules
+        ├── auth/
+        │   ├── router.py         # Login / registration endpoints
+        │   ├── schemas.py        # Request / response Pydantic models
+        │   └── services.py       # Auth business logic
+        │
+        ├── users/
+        │   ├── models.py         # User SQLAlchemy / ORM model
+        │   ├── router.py         # User profile / admin routes
+        │   ├── schemas.py        # User Pydantic schemas
+        │   └── services.py       # User management logic
+        │
+        ├── projects/
+        │   ├── models.py         # Project, Member ORM models
+        │   ├── router.py         # Project CRUD & team assignments
+        │   ├── schemas.py        # Project validation schemas
+        │   └── services.py       # Business rules (e.g., check access rights)
+        │
+        ├── tasks/
+        │   ├── models.py         # Task, Subtask, Tag ORM models
+        │   ├── router.py         # Task status updates, assignee routes
+        │   ├── schemas.py        # Task payloads (title, priority, status)
+        │   └── services.py       # Task workflows, history tracking
+        │
+        └── sprints/
+            ├── models.py         # Sprint ORM models
+            ├── router.py         # Sprint lifecycle endpoints
+            ├── schemas.py        # Sprint validation schemas
+            └── services.py       # Backlog management, active sprint logic

@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, or_, asc, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.pagination import parse_sort
 from src.modules.notifications.service import create_event_notification
 from src.modules.notifications.models import NotificationType
 from src.modules.projects.models import Project, ProjectMember, ProjectRole, ProjectStatus
@@ -425,14 +426,7 @@ async def list_project_tasks(
             )
 
     # Support sort=-due_date convention from spec
-    order = "desc"
-    field_name = sort_by
-    if sort_by.startswith("-"):
-        field_name = sort_by[1:]
-        order = "desc"
-    elif sort_by.startswith("+"):
-        field_name = sort_by[1:]
-        order = "asc"
+    field_name, order = parse_sort(sort_by)
 
     if field_name not in SEARCH_SORT_ALLOWLIST:
         raise HTTPException(

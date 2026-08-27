@@ -1,16 +1,29 @@
 """Business logic for user administration and profile management."""
+import math
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update, or_
+from sqlalchemy import select, update, or_, func, asc, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.pagination import parse_sort
+from src.core.schemas import PaginationMeta
 from src.core.security import hash_password
 from src.modules.auth.models import RefreshToken
 from src.modules.users.models import User, SystemRole, UserStatus
 from src.modules.users.schemas import UserCreate, UpdateUserStatus, UpdateUserRole, UpdateUserProfile
+
+# spec FR-07: User search supports filter (status/role), sort, and pagination.
+USER_SORT_ALLOWLIST = {
+    "full_name": User.full_name,
+    "email": User.email,
+    "status": User.status,
+    "system_role": User.system_role,
+    "created_at": User.created_at,
+    "last_login_at": User.last_login_at,
+}
 
 
 async def create_user(db: AsyncSession, payload: UserCreate) -> User:
@@ -112,7 +125,11 @@ async def list_users(
     search: Optional[str],
     status_filter: Optional[UserStatus],
     role_filter: Optional[SystemRole],
-) -> List[User]:
+    sort_by: str,
+    page: int,
+    page_size: int,
+) -> dict:
+    """FR-07: search/filter/sort/paginate users."""
     query = select(User)
 
     # Scoping for Project Manager / Team Member (V = view only within projects they're in)
@@ -142,5 +159,32 @@ async def list_users(
             )
         )
 
-    result = await db.execute(query)
-    return result.scalars().all()
+    field_name, order = parse_sort(sort_by)
+    if field_name not in USER_SORT_ALLOWLIST:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid sort field '{sort_by}'. Allowed fields: {list(USER_SORT_ALLOWLIST.keys())}",
+        )
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total_items = (await db.execute(count_query)).scalar() or 0
+
+    sort_column = USER_SORT_ALLOWLIST[field_name]
+    direction = desc if order == "desc" else asc
+    query = query.order_by(direction(sort_column))
+
+    offset = (page - 1) * page_size
+    result = await db.execute(query.offset(offset).limit(page_size))
+    users = result.scalars().all()
+
+    total_pages = math.ceil(total_items / page_size) if total_items > 0 else 0
+
+    return {
+        "items": users,
+        "pagination": PaginationMeta(
+            page=page,
+            page_size=page_size,
+            total_items=total_items,
+            total_pages=total_pages,
+        ),
+    }
