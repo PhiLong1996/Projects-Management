@@ -1,10 +1,28 @@
 import uuid
-from datetime import date, datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Generic, TypeVar
 from pydantic import BaseModel, Field, field_validator
 from src.modules.tasks.models import TaskPriority, TaskStatus
 
 T = TypeVar("T")
+
+
+def _normalize_to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Every datetime the app generates itself (created_at, updated_at, ...)
+    is a naive UTC value from `datetime.utcnow()`, and the DB columns are
+    plain `TIMESTAMP WITHOUT TIME ZONE`. Clients, however, commonly send
+    due_date as an ISO string with an offset/"Z" (e.g. "...T03:47:43Z"),
+    which Pydantic parses into a timezone-AWARE datetime. SQLite tolerates
+    the mismatch silently, but Postgres/asyncpg does not: binding an aware
+    datetime to a naive column raises
+    `TypeError: can't subtract offset-naive and offset-aware datetimes`
+    deep in asyncpg's codec. Converting to naive UTC here keeps every
+    datetime the app stores on this consistent footing regardless of what
+    the client sent.
+    """
+    if value is not None and value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
 
 
 class TaskCreate(BaseModel):
@@ -15,6 +33,11 @@ class TaskCreate(BaseModel):
     assignee_id: Optional[uuid.UUID] = None
     due_date: Optional[datetime] = None
     estimated_hours: Optional[float] = Field(None, ge=0.0)
+
+    @field_validator("due_date")
+    @classmethod
+    def _due_date_naive_utc(cls, v: Optional[datetime]) -> Optional[datetime]:
+        return _normalize_to_naive_utc(v)
 
 
 class TaskUpdate(BaseModel):
@@ -27,6 +50,11 @@ class TaskUpdate(BaseModel):
     due_date: Optional[datetime] = None
     estimated_hours: Optional[float] = Field(None, ge=0.0)
     actual_hours: Optional[float] = Field(None, ge=0.0)
+
+    @field_validator("due_date")
+    @classmethod
+    def _due_date_naive_utc(cls, v: Optional[datetime]) -> Optional[datetime]:
+        return _normalize_to_naive_utc(v)
 
 
 class TaskResponse(BaseModel):

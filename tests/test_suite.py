@@ -193,6 +193,29 @@ class TestProjectAndSprint(BaseAPITestCase):
         self.assertEqual(r.status_code, 201, r.text)
         self.project = r.json()
 
+    def test_project_end_date_before_start_date_rejected_on_create(self):
+        r = self.client.post(
+            "/api/v1/projects",
+            json={
+                "code": f"BADPRJ{id(self)}",
+                "name": "Bad Project",
+                "start_date": "2026-06-30",
+                "end_date": "2026-01-01",
+            },
+            headers=self.pm_headers,
+        )
+        self.assertEqual(r.status_code, 422, r.text)
+
+    def test_project_end_date_before_start_date_rejected_on_update(self):
+        # self.project (from setUp) has start_date=2026-01-01, end_date=2026-06-30.
+        # Only touching end_date must still be validated against the existing start_date.
+        r = self.client.patch(
+            f"/api/v1/projects/{self.project['id']}",
+            json={"end_date": "2025-12-01"},
+            headers=self.pm_headers,
+        )
+        self.assertEqual(r.status_code, 400, r.text)
+
     def test_sprint_within_project_bounds_ok(self):
         r = self.client.post(
             f"/api/v1/projects/{self.project['id']}/sprints",
@@ -357,6 +380,28 @@ class TestTaskStateMachineAndPermissions(BaseAPITestCase):
             json={"title": "Do the thing", "priority": "HIGH", "assignee_id": self.tm["id"]},
             headers=self.pm_headers,
         ).json()
+
+    def test_due_date_with_timezone_offset_is_accepted(self):
+        # Regression test: a client sending due_date as an ISO string with a
+        # "Z"/offset suffix (e.g. "...T03:47:43.118Z") used to parse into a
+        # timezone-AWARE datetime that SQLite tolerated but Postgres/asyncpg
+        # rejected with "can't subtract offset-naive and offset-aware
+        # datetimes", since the due_date column is TIMESTAMP WITHOUT TIME
+        # ZONE. TaskCreate/TaskUpdate now normalize due_date to naive UTC,
+        # so this must succeed (not 500) regardless of backend.
+        r = self.client.post(
+            f"/api/v1/projects/{self.project['id']}/tasks",
+            json={
+                "title": "Task with tz-aware due date",
+                "priority": "HIGH",
+                "due_date": "2026-08-27T03:47:43.118Z",
+            },
+            headers=self.pm_headers,
+        )
+        self.assertEqual(r.status_code, 201, r.text)
+        # "Z" == UTC, so the naive value stored/returned should match the
+        # wall-clock time as given, just without the offset suffix.
+        self.assertTrue(r.json()["due_date"].startswith("2026-08-27T03:47:43.118"))
 
     def test_valid_transition_todo_to_in_progress(self):
         r = self.client.patch(

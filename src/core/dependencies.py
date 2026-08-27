@@ -1,19 +1,28 @@
 import uuid
 import jwt
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.database import get_db
 from src.core.security import SECRET_KEY, ALGORITHM
 from src.modules.users.models import User, UserStatus, SystemRole
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+# Plain "expect a Bearer token" scheme — NOT OAuth2PasswordBearer. This app's
+# /auth/login is a custom JSON endpoint (email/password body), not the real
+# OAuth2 password grant (username/password form) that OAuth2PasswordBearer
+# advertises to clients/Swagger. Using the real OAuth2 scheme here made
+# Swagger's "Authorize" dialog build a form-encoded POST to /auth/login that
+# our endpoint can't parse (422), since it doesn't match our JSON contract.
+# HTTPBearer just means "read the token out of the Authorization header" and
+# gives Swagger a simple paste-your-token box instead.
+bearer_scheme = HTTPBearer()
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db)
 ) -> User:
+    token = credentials.credentials
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",

@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from src.modules.projects.models import ProjectStatus, ProjectRole
 
 
@@ -16,6 +16,13 @@ class ProjectCreate(BaseModel):
     @field_validator("code")
     def normalize_code(cls, v: str) -> str:
         return v.strip().upper()
+
+    # Both dates are optional, so only compare when the caller supplied both.
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValueError("end_date cannot be before start_date")
+        return self
 
 
 class ProjectUpdate(BaseModel):

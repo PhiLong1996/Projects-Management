@@ -109,7 +109,20 @@ async def update_project(
                 detail="Only the assigned Project Manager or Administrator can update this project.",
             )
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+
+    # Validate the resulting date range: a partial update might only touch
+    # one of start_date/end_date, so compare against whichever value is
+    # already on the project for the field not being changed.
+    new_start = updates.get("start_date", project.start_date)
+    new_end = updates.get("end_date", project.end_date)
+    if new_start and new_end and new_start > new_end:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="end_date cannot be before start_date",
+        )
+
+    for field, value in updates.items():
         setattr(project, field, value)
 
     await db.commit()
