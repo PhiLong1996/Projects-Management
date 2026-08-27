@@ -39,6 +39,8 @@ src/
       router.py    thin HTTP layer — calls service.py, no business logic
 tests/
   test_suite.py             automated tests (unittest)
+nginx/
+  nginx.conf                 reverse proxy config used by docker-compose's `nginx` service
 ```
 
 Cross-module calls always go through the target module's `service.py`
@@ -54,10 +56,23 @@ docker compose up --build
 
 This starts:
 - `db` — PostgreSQL 15
-- `web` — the API, on http://localhost:8000 (auto-reload enabled), waiting for
-  `db` to report healthy before starting
+- `web` — the API (auto-reload enabled), waiting for `db` to report healthy
+  before starting. Not published to the host directly — reached only
+  through `nginx` (see below), same as a real deployment.
+- `nginx` — reverse proxy in front of `web`, published on http://localhost
 
-Swagger UI: http://localhost:8000/docs
+The app is reachable at **http://localhost** (not `:8000`) — Nginx is now
+the single entrypoint into the stack. Swagger UI: http://localhost/docs.
+Nginx's config (`nginx/nginx.conf`) forwards everything to `web:8000` on
+the internal Docker network and sets the usual proxy headers
+(`X-Forwarded-For`, `X-Forwarded-Proto`, ...); `web`'s uvicorn runs with
+`--proxy-headers --forwarded-allow-ips='*'` so it trusts those headers
+coming from `nginx` (safe here since `web` isn't reachable from outside the
+Docker network at all — only `nginx` is).
+
+If you need direct access to the API container itself (bypassing Nginx,
+e.g. for debugging), temporarily add a `ports: ["8000:8000"]` entry back
+to the `web` service in `docker-compose.yml`.
 
 On first boot, if the `users` table is empty, an Administrator account is
 seeded automatically using `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `.env`
