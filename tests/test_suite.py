@@ -15,7 +15,8 @@ import os
 import re
 import sys
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import patch, MagicMock
 
 # Ensure project root is importable and tests use an isolated sqlite DB.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -26,6 +27,7 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DB_PATH}"
 
 from fastapi.testclient import TestClient  # noqa: E402
 from src.app import app  # noqa: E402
+from src.core.email import send_email  # noqa: E402
 
 
 class BaseAPITestCase(unittest.TestCase):
@@ -264,6 +266,77 @@ class TestForgotPassword(BaseAPITestCase):
         # The refresh token from before the reset must no longer work.
         r2 = self.client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
         self.assertEqual(r2.status_code, 401)
+
+    def test_forgot_password_email_failure_does_not_break_endpoint(self):
+        # A real SMTP target (unlike the always-succeeds console dev
+        # fallback) can fail to connect. forgot_password() must swallow
+        # that and still return the uniform 204 — see the try/except around
+        # send_email() in src/modules/auth/service.py.
+        with patch(
+            "src.modules.auth.service.send_email",
+            side_effect=OSError("connection refused"),
+        ):
+            r = self.client.post("/api/v1/auth/forgot-password", json={"email": self.email})
+        self.assertEqual(r.status_code, 204, r.text)
+
+
+class TestEmailHelper(unittest.IsolatedAsyncioTestCase):
+    """Unit tests for src/core/email.py's send_email() branching: dev
+    fallback (no SMTP host at all) vs. sending to a no-auth relay like
+    Mailpit (host set, no credentials) vs. sending through an authenticated
+    provider (host + user + password). Mocks smtplib.SMTP directly rather
+    than requiring a real server."""
+
+    @staticmethod
+    def _settings(**overrides):
+        base = dict(
+            smtp_host="", smtp_port=1025, smtp_user="", smtp_password="",
+            smtp_from="", smtp_use_tls=False,
+        )
+        base.update(overrides)
+        return SimpleNamespace(**base)
+
+    @staticmethod
+    def _mock_smtp_instance():
+        """smtplib.SMTP is used as a context manager (`with smtplib.SMTP(...) as server`);
+        build a MagicMock that supports that and returns a separate mock for
+        `server` so calls like server.login(...) can be asserted on."""
+        server = MagicMock()
+        instance = MagicMock()
+        instance.__enter__ = MagicMock(return_value=server)
+        instance.__exit__ = MagicMock(return_value=False)
+        return instance, server
+
+    async def test_dev_fallback_when_smtp_host_unset(self):
+        with patch("src.core.email.get_settings", return_value=self._settings(smtp_host="")):
+            with patch("src.core.email.smtplib.SMTP") as mock_smtp_cls:
+                await send_email(to="user@example.com", subject="Hi", body="Body")
+        mock_smtp_cls.assert_not_called()
+
+    async def test_sends_without_login_to_noauth_relay(self):
+        # Mirrors the mailpit docker-compose service: host set, no user/password.
+        settings = self._settings(smtp_host="mailpit", smtp_port=1025, smtp_use_tls=False)
+        instance, server = self._mock_smtp_instance()
+        with patch("src.core.email.get_settings", return_value=settings):
+            with patch("src.core.email.smtplib.SMTP", return_value=instance) as mock_smtp_cls:
+                await send_email(to="user@example.com", subject="Hi", body="Body")
+        mock_smtp_cls.assert_called_once_with("mailpit", 1025, timeout=10)
+        server.starttls.assert_not_called()
+        server.login.assert_not_called()
+        server.sendmail.assert_called_once()
+
+    async def test_sends_with_login_when_credentials_present(self):
+        settings = self._settings(
+            smtp_host="smtp.example.com", smtp_port=587,
+            smtp_user="user", smtp_password="pass", smtp_use_tls=True,
+        )
+        instance, server = self._mock_smtp_instance()
+        with patch("src.core.email.get_settings", return_value=settings):
+            with patch("src.core.email.smtplib.SMTP", return_value=instance):
+                await send_email(to="user@example.com", subject="Hi", body="Body")
+        server.starttls.assert_called_once()
+        server.login.assert_called_once_with("user", "pass")
+        server.sendmail.assert_called_once()
 
 
 class TestProjectAndSprint(BaseAPITestCase):

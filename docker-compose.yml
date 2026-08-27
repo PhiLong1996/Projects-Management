@@ -8,20 +8,44 @@ services:
       - .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/taskdb
+      # mailpit is this Compose network's DNS name for the mail service
+      # below — not reachable as "mailpit" from the host machine, only
+      # from inside another container (same as DATABASE_URL's "db" above).
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - SMTP_USE_TLS=false
     volumes:
       - ./src:/app/src
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
 
   nginx:
     image: nginx:alpine
     ports:
-      - "80:80"
+      # Host 8080, not 80: on Windows, port 80 is frequently already
+      # claimed (IIS, Skype, other services) or sits in a range Windows
+      # reserves and refuses non-admin binds for ("Ports are not
+      # available ... forbidden by its access permissions"). 8080 avoids
+      # that entirely without needing an elevated Docker/Windows setup.
+      - "8080:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - web
+
+  mailpit:
+    # Self-hosted, no-auth dev SMTP relay: accepts any mail on 1025 with no
+    # login required, and shows what was "sent" in a web UI on 8025
+    # (http://localhost:8025) instead of actually delivering anywhere.
+    # Nothing leaves your machine — ideal for testing forgot-password
+    # emails without a real mail provider account.
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"  # web UI — view captured emails here
+      - "1025:1025"  # SMTP — also reachable as localhost:1025 outside Docker
 
   db:
     image: postgres:15-alpine

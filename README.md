@@ -56,19 +56,28 @@ docker compose up --build
 
 This starts:
 - `db` — PostgreSQL 15
+- `mailpit` — self-hosted, no-auth dev SMTP relay (see §7); `web` is
+  pre-wired to send forgot-password emails to it (`SMTP_HOST=mailpit`).
+  View captured emails at http://localhost:8025 — nothing is ever actually
+  delivered anywhere.
 - `web` — the API (auto-reload enabled), waiting for `db` to report healthy
   before starting. Not published to the host directly — reached only
   through `nginx` (see below), same as a real deployment.
-- `nginx` — reverse proxy in front of `web`, published on http://localhost
+- `nginx` — reverse proxy in front of `web`, published on http://localhost:8080
 
-The app is reachable at **http://localhost** (not `:8000`) — Nginx is now
-the single entrypoint into the stack. Swagger UI: http://localhost/docs.
-Nginx's config (`nginx/nginx.conf`) forwards everything to `web:8000` on
-the internal Docker network and sets the usual proxy headers
-(`X-Forwarded-For`, `X-Forwarded-Proto`, ...); `web`'s uvicorn runs with
-`--proxy-headers --forwarded-allow-ips='*'` so it trusts those headers
-coming from `nginx` (safe here since `web` isn't reachable from outside the
-Docker network at all — only `nginx` is).
+The app is reachable at **http://localhost:8080** (not `:8000`) — Nginx is
+now the single entrypoint into the stack. Swagger UI:
+http://localhost:8080/docs. Host port `8080` (not the standard `80`) is
+used deliberately: port 80 is commonly already claimed or blocked on
+Windows (IIS, Skype, other reserved-port issues), and 8080 avoids that
+without needing an elevated setup — see `docker-compose.yml` if you want
+to change it back to `80` on a machine where that's free. Nginx's config
+(`nginx/nginx.conf`) forwards everything to `web:8000` on the internal
+Docker network and sets the usual proxy headers (`X-Forwarded-For`,
+`X-Forwarded-Proto`, ...); `web`'s uvicorn runs with `--proxy-headers
+--forwarded-allow-ips='*'` so it trusts those headers coming from `nginx`
+(safe here since `web` isn't reachable from outside the Docker network at
+all — only `nginx` is).
 
 If you need direct access to the API container itself (bypassing Nginx,
 e.g. for debugging), temporarily add a `ports: ["8000:8000"]` entry back
@@ -157,7 +166,7 @@ doesn't reproduce against SQLite locally).
 | `SECRET_KEY` | — | JWT signing key. Use a random value ≥ 32 bytes in any real environment. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@example.com` / `Admin@123` | Seeded only if the `users` table is empty |
 | `DB_ECHO` | `false` | Set `true` to log SQL statements while debugging |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | unset | Outbound email for forgot-password. Left blank, emails are logged instead of sent (see §7). |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | unset | Outbound email for forgot-password. Left blank, emails are logged instead of sent; under Docker Compose these default to the self-hosted `mailpit` relay (see §7). |
 | `SMTP_FROM` | `SMTP_USER` | "From" address on sent emails, if different from the login user |
 | `SMTP_USE_TLS` | `true` | STARTTLS on connect |
 | `FRONTEND_URL` | `http://localhost:3000` | Base URL used to build the password-reset link emailed to users |
@@ -194,14 +203,32 @@ opaque random token (`secrets.token_urlsafe(48)`) is emailed to the user,
 only its SHA-256 hash is stored (`password_reset_tokens.token_hash`), and
 `used_at` (nullable, set once consumed) prevents replay.
 
-Email sending lives in `src/core/email.py`. **With no `SMTP_*` settings in
-`.env`, the email is logged/printed instead of sent** — this is intentional,
+Email sending lives in `src/core/email.py`. **With no `SMTP_HOST` set at
+all**, the email is logged/printed instead of sent — this is intentional,
 not a stub: it means the forgot-password flow is fully testable locally
 (see `TestForgotPassword` in `tests/test_suite.py`, which captures the
-logged email to extract the reset token) without needing a real mail
-provider. Add real SMTP credentials (Gmail app password, SendGrid,
-Mailtrap, etc.) to `.env` to send actual emails — no code changes needed,
-same `send_email()` call either way.
+logged email to extract the reset token) without needing any mail server
+running. A send failure never breaks the endpoint — `forgot_password()`
+catches it and logs it, so the response is still a uniform `204`.
+
+**Self-hosted SMTP (Mailpit).** `docker-compose.yml` includes a `mailpit`
+service — a real (but self-hosted, no-auth) SMTP server, so forgot-password
+emails are genuinely sent over SMTP rather than just logged, without
+needing a real mail provider account or any credentials:
+- `web` is pre-configured with `SMTP_HOST=mailpit` / `SMTP_PORT=1025` /
+  `SMTP_USE_TLS=false` (Docker's internal DNS resolves `mailpit` to that
+  container — same reasoning as `DATABASE_URL`'s `db` hostname in §6; it is
+  **not** reachable as `mailpit` from your host machine).
+- Open **http://localhost:8025** to view every email the app has sent —
+  Mailpit's web UI shows the full subject/body, including the reset link.
+- To test the same flow **outside Docker** (running `uvicorn` directly per
+  §4) against the same Mailpit container, set in your local `.env`:
+  `SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_USE_TLS=false` — Mailpit's
+  SMTP port is also published to the host. See `.env.example`.
+- To use a real provider instead (Gmail app password, SendGrid, Mailtrap,
+  ...) in any environment, set `SMTP_HOST` to that provider, plus
+  `SMTP_USER` / `SMTP_PASSWORD` and typically `SMTP_USE_TLS=true` — no code
+  changes needed, same `send_email()` call either way.
 
 ### Refresh token format & storage
 

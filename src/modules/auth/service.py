@@ -12,6 +12,7 @@ happens on every refresh, and presenting an already-rotated-out (revoked)
 token is treated as a possible theft signal: it revokes every session for
 that user, not just the one token.
 """
+import logging
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
@@ -33,6 +34,8 @@ from src.core.security import (
 from src.modules.auth.models import RefreshToken, PasswordResetToken
 from src.modules.auth.schemas import ChangePasswordRequest, TokenResponse
 from src.modules.users.models import User, UserStatus
+
+logger = logging.getLogger("auth")
 
 
 def _issue_token_pair(db: AsyncSession, user: User) -> TokenResponse:
@@ -204,18 +207,28 @@ async def forgot_password(db: AsyncSession, email: str) -> None:
 
     settings = get_settings()
     reset_link = f"{settings.frontend_url.rstrip('/')}/reset-password?token={raw_token}"
-    await send_email(
-        to=user.email,
-        subject="Reset your password",
-        body=(
-            f"Hi {user.full_name},\n\n"
-            "We received a request to reset your password. This link is valid for "
-            f"{PASSWORD_RESET_TOKEN_EXPIRE_MINUTES} minutes:\n\n"
-            f"{reset_link}\n\n"
-            "If you didn't request this, you can safely ignore this email — "
-            "your password will not be changed."
-        ),
-    )
+    try:
+        await send_email(
+            to=user.email,
+            subject="Reset your password",
+            body=(
+                f"Hi {user.full_name},\n\n"
+                "We received a request to reset your password. This link is valid for "
+                f"{PASSWORD_RESET_TOKEN_EXPIRE_MINUTES} minutes:\n\n"
+                f"{reset_link}\n\n"
+                "If you didn't request this, you can safely ignore this email — "
+                "your password will not be changed."
+            ),
+        )
+    except Exception:
+        # The reset token is already committed to the DB above, so the flow
+        # itself succeeded — a real SMTP server (unlike the old
+        # always-succeeds console dev-fallback) can now fail to connect
+        # (wrong host, relay down, network hiccup). Don't let that surface
+        # as a 500 and break the uniform-204-response guarantee; just log it
+        # so it's visible to an operator, and the user can request another
+        # reset link if the email never arrives.
+        logger.exception("Failed to send password reset email to %s", user.email)
 
 
 async def reset_password(db: AsyncSession, token: str, new_password: str) -> None:
