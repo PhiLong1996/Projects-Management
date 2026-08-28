@@ -14,12 +14,17 @@ services:
       - SMTP_HOST=mailpit
       - SMTP_PORT=1025
       - SMTP_USE_TLS=false
+      # Fan-out layer for realtime notification delivery (WebSocket) — see
+      # src/core/realtime.py. Same "internal DNS name only" note as above.
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./src:/app/src
     depends_on:
       db:
         condition: service_healthy
       mailpit:
+        condition: service_started
+      redis:
         condition: service_started
 
   nginx:
@@ -46,6 +51,16 @@ services:
     ports:
       - "8025:8025"  # web UI — view captured emails here
       - "1025:1025"  # SMTP — also reachable as localhost:1025 outside Docker
+
+  redis:
+    # Fan-out layer for realtime notification delivery: every `web`
+    # instance publishes new notifications here and subscribes to hear
+    # about ones published by the others, so a WebSocket connected to any
+    # one instance still gets pushed to (see src/core/realtime.py). Not
+    # used for anything else (no caching, no Celery/task-queue use here).
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
 
   db:
     image: postgres:15-alpine

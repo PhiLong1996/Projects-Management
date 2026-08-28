@@ -1,6 +1,9 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from src.database import async_engine, Base
+from src.core.realtime import redis_subscriber_loop
 from src.modules.auth.router import router as auth_router
 from src.modules.projects.router import router as projects_router
 from src.modules.sprints.router import router as sprints_router
@@ -11,6 +14,8 @@ from src.modules.reporting.router import router as reporting_router
 from src.modules.users.router import router as users_router
 from src.modules.notifications.router import router as notifications_router
 from src.modules.comments.router import router as comments_router
+
+logger = logging.getLogger("app")
 
 # Import all ORM models to register metadata
 from src.modules.users.models import User
@@ -48,7 +53,26 @@ async def lifespan(app: FastAPI):
                     status=UserStatus.ACTIVE
                 )
                 session.add(admin_user)
+
+    # Background task: stays subscribed to Redis for the app's lifetime so
+    # notifications published by *any* instance (including this one) reach
+    # the WebSocket connections this instance is holding. See
+    # src/core/realtime.py's module docstring for the full delivery path.
+    # If Redis isn't reachable, this retries quietly in the background
+    # rather than blocking startup — notification creation and the REST
+    # endpoints work regardless of whether realtime delivery is up.
+    subscriber_task = asyncio.create_task(redis_subscriber_loop())
+
     yield
+
+    subscriber_task.cancel()
+    try:
+        await subscriber_task
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.warning("Error while shutting down Redis subscriber task", exc_info=True)
+
     await async_engine.dispose()
 
 app = FastAPI(

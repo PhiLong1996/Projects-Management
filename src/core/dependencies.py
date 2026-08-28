@@ -18,11 +18,18 @@ from src.modules.users.models import User, UserStatus, SystemRole
 # gives Swagger a simple paste-your-token box instead.
 bearer_scheme = HTTPBearer()
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_db)
-) -> User:
-    token = credentials.credentials
+
+async def get_user_from_access_token(token: str, db: AsyncSession) -> User:
+    """Shared core of access-token validation: decode + look up the user.
+    Raises the same HTTPExceptions `get_current_user` always has (401 for a
+    missing/invalid/expired token, 403 for a valid token whose user is now
+    locked/gone) — `get_current_user` (HTTP, below) just re-raises them
+    as-is. The WebSocket endpoint (src/modules/notifications/router.py)
+    can't receive an Authorization header from a browser WebSocket client,
+    so it takes the token as a query param, calls this directly, and closes
+    the socket on any HTTPException rather than relying on FastAPI's HTTP
+    exception handling (which doesn't apply to WebSocket connections).
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -39,13 +46,20 @@ async def get_current_user(
 
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
     user = result.scalar_one_or_none()
-    
+
     if user is None or user.status == UserStatus.LOCKED:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is locked or inactive"
         )
     return user
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db)
+) -> User:
+    return await get_user_from_access_token(credentials.credentials, db)
 
 def require_roles(*allowed_roles: SystemRole):
     """Enforce System Level Roles (ADMIN, PROJECT_MANAGER, etc.)"""

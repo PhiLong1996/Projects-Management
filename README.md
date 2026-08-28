@@ -28,6 +28,8 @@ src/
   core/
     security.py              password hashing, JWT helpers
     dependencies.py           get_current_user, require_roles
+    realtime.py                WebSocket connection registry + Redis pub/sub fan-out (see §10)
+    email.py                   outbound email (forgot-password, see §7)
   jobs/
     check_deadlines.py        scheduled job: DEADLINE_APPROACHING / TASK_OVERDUE
   modules/
@@ -60,6 +62,9 @@ This starts:
   pre-wired to send forgot-password emails to it (`SMTP_HOST=mailpit`).
   View captured emails at http://localhost:8025 — nothing is ever actually
   delivered anywhere.
+- `redis` — fan-out layer for realtime (WebSocket) notification delivery
+  across `web` instances/workers (see §10). `web` is pre-wired to it
+  (`REDIS_URL=redis://redis:6379/0`).
 - `web` — the API (auto-reload enabled), waiting for `db` to report healthy
   before starting. Not published to the host directly — reached only
   through `nginx` (see below), same as a real deployment.
@@ -170,6 +175,7 @@ doesn't reproduce against SQLite locally).
 | `SMTP_FROM` | `SMTP_USER` | "From" address on sent emails, if different from the login user |
 | `SMTP_USE_TLS` | `true` | STARTTLS on connect |
 | `FRONTEND_URL` | `http://localhost:3000` | Base URL used to build the password-reset link emailed to users |
+| `REDIS_URL` | `redis://localhost:6379/0` | Fan-out layer for realtime (WebSocket) notification delivery. Overridden to `redis://redis:6379/0` by `docker-compose.yml` (see §10). If unreachable, notifications still save to the DB — only the live push is skipped. |
 
 Unrecognized keys in `.env` are ignored rather than crashing startup.
 
@@ -299,11 +305,10 @@ fall back to some default. `page_size` is capped at 100.
 
 ## 10. Notifications
 
-In-app notifications only (MVP). Triggered on task assignment/reassignment,
-status changes, priority/due-date updates, new comments, and project member
-additions. `src/jobs/check_deadlines.py` should be run periodically (e.g. via
-cron, every 15–30 minutes) to emit `DEADLINE_APPROACHING` (due within 24h)
-and `TASK_OVERDUE` notifications:
+Triggered on task assignment/reassignment, status changes, priority/due-date
+updates, new comments, and project member additions. `src/jobs/check_deadlines.py`
+should be run periodically (e.g. via cron, every 15–30 minutes) to emit
+`DEADLINE_APPROACHING` (due within 24h) and `TASK_OVERDUE` notifications:
 
 ```bash
 python -m src.jobs.check_deadlines
@@ -311,6 +316,44 @@ python -m src.jobs.check_deadlines
 
 Notifications are deduplicated via `deduplication_key`, so re-running the job
 does not create duplicate entries.
+
+### Realtime delivery (WebSocket + Redis)
+
+Every notification is still a row in `notifications` (`GET /notifications`
+works exactly as before), but a connected client no longer has to poll for
+new ones. Connect to:
+
+```
+ws://<host>/api/v1/notifications/ws?token=<access_token>
+```
+
+using the same JWT access token as `Authorization: Bearer` elsewhere — it
+has to travel as a query param here since a browser's native WebSocket API
+can't set custom headers on the handshake. Once connected, every
+notification created for that user is pushed as JSON (same shape as the
+`GET /notifications` response items, plus `recipient_id`) as soon as it's
+committed to the DB. An invalid/expired token gets the connection closed
+immediately (WS close code `1008`) instead of accepted.
+
+This is deliberately **WebSocket for delivery, Redis only for fan-out
+between app instances** — not RabbitMQ. `docker-compose.yml`'s `web` can in
+principle run as more than one container/worker, and a notification created
+by the request handled on instance A needs to reach a socket connected to
+instance B; a plain in-memory connection registry can't do that alone.
+Redis Pub/Sub is the lightweight standard fit for that specific "fan this
+event out to every instance" problem — every instance publishes to one
+Redis channel and subscribes to it, then only forwards to the sockets it
+personally holds (see `src/core/realtime.py` for the full path, including
+why this wasn't built on RabbitMQ: a message broker's queues/acks/retries
+solve durable work distribution, not a lightweight one-shot broadcast like
+this).
+
+If Redis is unreachable, notification creation still succeeds — it's just
+DB rows either way — only the live push is skipped (logged as a warning);
+a client will still see it on its next `GET /notifications`. Under Docker
+Compose, `web` is pre-wired to `REDIS_URL=redis://redis:6379/0`; outside
+Docker (§4), point it at `redis://localhost:6379/0` (`docker compose up
+redis -d` is enough to run just that piece locally). See `.env.example`.
 
 ## 11. Reporting
 
@@ -342,7 +385,10 @@ update, task list, project dashboard, standard error shape).
 
 ## 14. Known Scope Limits (MVP)
 
-Per Section 10.2 of the spec, the following are explicitly out of MVP scope
-and not implemented: email/WebSocket notification delivery, PDF export,
-frontend UI, Redis/Celery/RabbitMQ/Elasticsearch, and the optional bonus
-features (AI assistant, OAuth logins, Kanban/Gantt views, etc.).
+Per Section 10.2 of the spec, the following were originally out of MVP scope;
+email delivery (§7) and WebSocket + Redis realtime notification delivery
+(§10) have since been added, the rest remain out of scope: PDF export,
+frontend UI, Celery/Elasticsearch, RabbitMQ (a message broker for durable
+work queues wasn't the right fit for realtime notification fan-out — see
+§10's explanation of why Redis Pub/Sub was used there instead), and the
+optional bonus features (AI assistant, OAuth logins, Kanban/Gantt views, etc.).

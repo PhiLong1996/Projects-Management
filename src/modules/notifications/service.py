@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import src.core.realtime  # noqa: F401 -- importing registers the after_commit broadcast listener (see that module's docstring)
 from src.modules.projects.models import ProjectMember
 from src.modules.notifications.models import Notification, NotificationType
 from src.modules.notifications.schemas import PaginatedNotificationResponse, BatchMarkReadRequest
@@ -162,4 +163,35 @@ async def create_event_notification(
         is_read=False,
     )
     db.add(notif)
-    # Note: caller is responsible for db.commit()
+
+    # Flush (not commit) so notif.id/created_at get their Python-side
+    # defaults applied now, while still leaving the transaction open for the
+    # caller to commit (or roll back) as before — this does not change the
+    # atomicity contract below.
+    await db.flush()
+
+    # Stash a plain, already-serialized dict for the realtime layer to push
+    # once (and only if) this transaction actually commits — see
+    # src/core/realtime.py's `_broadcast_after_commit` for the other half of
+    # this. Using session.info (not e.g. a module-level list) keeps this
+    # scoped to the request's own session/transaction.
+    db.sync_session.info.setdefault("pending_notification_broadcasts", []).append(
+        {
+            "recipient_id": str(recipient_id),
+            "notification": {
+                "id": str(notif.id),
+                "recipient_id": str(notif.recipient_id),
+                "type": notif.type.value,
+                "title": notif.title,
+                "message": notif.message,
+                "entity_type": notif.entity_type,
+                "entity_id": str(notif.entity_id) if notif.entity_id else None,
+                "is_read": notif.is_read,
+                "read_at": None,
+                "created_at": notif.created_at.isoformat() if notif.created_at else None,
+            },
+        }
+    )
+
+    # Note: caller is still responsible for db.commit() — nothing above
+    # commits early, and nothing is pushed to a client unless/until they do.

@@ -11,12 +11,23 @@ Covers (per AC-12 / implementation_plan.md Verification Plan):
 Run with:
     python -m unittest tests.test_suite -v
 """
+import json
+import logging
 import os
 import re
 import sys
+import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
+
+# Most of this suite doesn't run against a live Redis (TestRealtimeNotifications
+# mocks it explicitly where it matters — see that class). Every other test that
+# happens to create a notification would otherwise print a full "Redis
+# unreachable" warning+traceback (src/core/realtime.py's intentional, tested
+# graceful-degradation path) — silence just that logger so real test failures
+# aren't buried in expected noise.
+logging.getLogger("realtime").setLevel(logging.CRITICAL)
 
 # Ensure project root is importable and tests use an isolated sqlite DB.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -25,9 +36,11 @@ if os.path.exists(TEST_DB_PATH):
     os.remove(TEST_DB_PATH)
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DB_PATH}"
 
+from starlette.websockets import WebSocketDisconnect  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from src.app import app  # noqa: E402
 from src.core.email import send_email  # noqa: E402
+from src.core.realtime import manager as realtime_manager  # noqa: E402
 
 
 class BaseAPITestCase(unittest.TestCase):
@@ -700,6 +713,86 @@ class TestNotificationScoping(BaseAPITestCase):
         self.assertEqual(r_pm.status_code, 200)
         # PM created the task themself, so should not have a TASK_ASSIGNED notif about it
         self.assertTrue(all(item["recipient_id"] == pm["id"] for item in r_pm.json()["items"]))
+
+
+class TestRealtimeNotifications(BaseAPITestCase):
+    """Covers src/core/realtime.py's two halves: (1) the WebSocket endpoint
+    itself — auth, and that it registers/deregisters in the in-process
+    ConnectionManager — and (2) that creating a notification schedules a
+    Redis publish once its transaction commits. Neither test needs a real
+    Redis running: (1) never involves Redis at all (it only exercises local
+    connection bookkeeping), and (2) mocks `_get_redis_client` the same way
+    `TestEmailHelper` mocks smtplib — this suite should pass identically
+    whether or not `docker compose up redis` happened to be running."""
+
+    def setUp(self):
+        admin_token = self.login("admin@example.com", "Admin@123").json()["access_token"]
+        self.admin_headers = self.auth_headers(admin_token)
+        self.suffix = str(id(self))
+        self.member = self.create_user(
+            self.admin_headers, f"rt{self.suffix}@example.com", "Realtime Member", "TEAM_MEMBER"
+        )
+        self.member_token = self.login(self.member["email"], "Password1").json()["access_token"]
+
+    def test_websocket_rejects_invalid_token(self):
+        with self.assertRaises(WebSocketDisconnect):
+            with self.client.websocket_connect("/api/v1/notifications/ws?token=not-a-real-token"):
+                pass
+
+    def test_websocket_connect_registers_and_disconnect_deregisters(self):
+        user_id = self.member["id"]
+        self.assertEqual(realtime_manager.local_connection_count(user_id), 0)
+
+        with self.client.websocket_connect(f"/api/v1/notifications/ws?token={self.member_token}"):
+            self.assertEqual(realtime_manager.local_connection_count(user_id), 1)
+
+        self.assertEqual(realtime_manager.local_connection_count(user_id), 0)
+
+    def test_notification_creation_publishes_to_redis_after_commit(self):
+        # Same setup as TestNotificationScoping: PM creates a project, adds
+        # a team member, then assigns them a task — that last step is what
+        # calls create_event_notification() + commits.
+        pm = self.create_user(self.admin_headers, f"rtpm{self.suffix}@example.com", "RT PM", "PROJECT_MANAGER")
+        pm_headers = self.auth_headers(self.login(pm["email"], "Password1").json()["access_token"])
+
+        project = self.client.post(
+            "/api/v1/projects", json={"code": f"RTPRJ{self.suffix}", "name": "Realtime Project"}, headers=pm_headers
+        ).json()
+        self.client.post(
+            f"/api/v1/projects/{project['id']}/members",
+            json={"user_id": self.member["id"], "project_role": "MEMBER"},
+            headers=pm_headers,
+        )
+
+        fake_redis_client = MagicMock()
+        fake_redis_client.publish = AsyncMock()
+
+        with patch("src.core.realtime._get_redis_client", return_value=fake_redis_client):
+            r = self.client.post(
+                f"/api/v1/projects/{project['id']}/tasks",
+                json={"title": "Realtime Task", "priority": "MEDIUM", "assignee_id": self.member["id"]},
+                headers=pm_headers,
+            )
+            self.assertEqual(r.status_code, 201, r.text)
+
+            # The publish is scheduled as an asyncio task from a sync
+            # SQLAlchemy `after_commit` event (see _broadcast_after_commit
+            # in src/core/realtime.py) rather than awaited inline, so it can
+            # run slightly after the HTTP response is already back. A short
+            # wait here (in this test's own thread — TestClient runs the
+            # app on a separate thread/loop, so this doesn't block it) gives
+            # that scheduled task room to execute before we assert on it.
+            for _ in range(50):
+                if fake_redis_client.publish.await_count:
+                    break
+                time.sleep(0.02)
+
+        fake_redis_client.publish.assert_awaited_once()
+        channel, raw_payload = fake_redis_client.publish.await_args.args
+        self.assertEqual(channel, "notifications")
+        payload = json.loads(raw_payload)
+        self.assertEqual(payload["recipient_id"], self.member["id"])
+        self.assertEqual(payload["notification"]["type"], "TASK_ASSIGNED")
 
 
 class TestProjectAndUserSearch(BaseAPITestCase):

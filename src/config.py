@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     # frontend's reset-password page actually lives.
     frontend_url: str = "http://localhost:3000"
 
+    # --- Realtime notification delivery (WebSocket + Redis pub/sub) ---
+    # Redis is only the fan-out layer between app instances/workers — each
+    # instance still pushes to its own locally-connected WebSocket clients.
+    # If Redis is unreachable, notification creation still succeeds (it's
+    # just DB rows); only the live push is skipped, with a warning logged
+    # (see src/core/realtime.py) — same "never let delivery infra break the
+    # core feature" pattern as the SMTP send in forgot-password.
+    redis_url: str = "redis://localhost:6379/0"
+
     max_file_size_bytes: int = 10 * 1024 * 1024
 
     allowed_mime_types: Set[str] = {
