@@ -7,20 +7,29 @@ changes *without* having to open every source file first. It will still be
 necessary to open the specific file being changed; this document exists to
 avoid re-deriving the whole system's shape from scratch every time.
 
-**How this relates to the other two root docs:**
-- `README.md` is user/developer-facing: how to run it, configure it, and
-  what each endpoint does at a glance. Keep reading it for "how do I start
-  this thing." It does not describe internal implementation details,
-  permission logic, or design rationale in depth.
+**Repo layout:** this is a two-folder repo — `backend/` (FastAPI, described
+below) and `frontend/` (Next.js, §15) — each independently runnable with its
+own `docker-compose.yml`. This file stays at the repo root since it
+describes both, but the bulk of it is backend detail; paths below are
+repo-root-relative (`backend/src/...`) unless a heading says otherwise.
+
+**How this relates to the other root docs:**
+- `backend/README.md` is user/developer-facing: how to run the backend,
+  configure it, and what each endpoint does at a glance. Keep reading it for
+  "how do I start this thing." It does not describe internal implementation
+  details, permission logic, or design rationale in depth. `frontend/README.md`
+  is the equivalent for the frontend. The root `README.md` is just a short
+  index pointing at both.
 - `implementation_plan.md` is a **historical** audit document from the
   original pass that aligned this codebase with the spec PDF
   (`Mock Project_Smart Task Management System (1).pdf`). Its "Proposed
   Changes" are already implemented — treat it as a changelog, not as
   current source of truth. Everything built *after* that plan (search/sort/
   pagination for Project & User, forgot-password + email, Nginx, Mailpit,
-  WebSocket + Redis realtime notifications) is **not** described there —
-  it's covered in this file and in README.md instead.
-- This file should be kept up to date the same way README.md is: when a
+  WebSocket + Redis realtime notifications, CORS, and the `frontend/`
+  Next.js app) is **not** described there — it's covered in this file and
+  in the two READMEs instead.
+- This file should be kept up to date the same way the READMEs are: when a
   future session makes a structural change (new module, new endpoint, new
   business rule, new infra piece), update the relevant section here too.
 
@@ -31,11 +40,11 @@ avoid re-deriving the whole system's shape from scratch every time.
 Python 3.11 · FastAPI · Uvicorn · SQLAlchemy 2.0 (async ORM) · PostgreSQL
 (Docker) / SQLite (local dev & tests) · Pydantic v2 · JWT (`PyJWT`) ·
 `passlib`/`bcrypt` · Redis (realtime fan-out only) · Nginx (reverse proxy) ·
-Mailpit (dev SMTP relay). Full pinned versions: `requirements.txt`.
+Mailpit (dev SMTP relay). Full pinned versions: `backend/requirements.txt`.
 
 ## 2. Architecture
 
-Layered, per-module. Every module under `src/modules/<name>/` has the same
+Layered, per-module. Every module under `backend/src/modules/<name>/` has the same
 four files:
 
 | File | Responsibility |
@@ -53,40 +62,42 @@ never through another module's `router.py`.
 ## 3. Directory Map
 
 ```
-src/
-  app.py                        FastAPI app factory, router registration, lifespan
-                                 (schema create_all, admin seed, Redis subscriber task)
-  config.py                     Settings (pydantic-settings, reads .env)
-  database.py                   Async engine/session factory (AsyncSessionLocal), Base
-  core/
-    security.py                  password hashing, JWT + refresh/reset token helpers
-    dependencies.py              get_current_user (HTTPBearer), get_user_from_access_token
-                                  (shared core reused by the WS endpoint), require_roles
-    realtime.py                  WebSocket ConnectionManager + Redis pub/sub fan-out +
-                                  the SQLAlchemy after_commit broadcast hook
-    email.py                     outbound email (SMTP or dev-fallback console log)
-    schemas.py                   shared PaginationMeta / PaginatedResponse[T]
-    pagination.py                shared parse_sort() for all search endpoints
-  jobs/
-    check_deadlines.py           standalone script (run via cron) — DEADLINE_APPROACHING /
-                                  TASK_OVERDUE notifications
-  modules/
-    auth/        login, refresh, logout, change-password, forgot/reset-password
-    users/       user CRUD-ish admin ops, profile self-update, search
-    projects/    project CRUD, membership management
-    sprints/     sprint CRUD, close-sprint task migration
-    tasks/       task CRUD, status state machine, audit log, search (router.py + search_router.py)
-    comments/    comments + file attachments on tasks
-    dashboard/   per-project task stats
-    reporting/   CSV task export
-    notifications/  in-app notifications + the /ws realtime endpoint
-tests/
-  test_suite.py                  the entire automated test suite (unittest), ~51 tests
-nginx/
-  nginx.conf                     reverse proxy config for the `nginx` docker-compose service
-docker-compose.yml                web, nginx, db (postgres), mailpit, redis
-requirements.txt
-.env.example                     documents every config key (see §9)
+backend/                         FastAPI app — self-contained, own docker-compose.yml
+  src/
+    app.py                        FastAPI app factory, router registration, lifespan
+                                   (schema create_all, admin seed, Redis subscriber task)
+    config.py                     Settings (pydantic-settings, reads .env)
+    database.py                   Async engine/session factory (AsyncSessionLocal), Base
+    core/
+      security.py                  password hashing, JWT + refresh/reset token helpers
+      dependencies.py              get_current_user (HTTPBearer), get_user_from_access_token
+                                    (shared core reused by the WS endpoint), require_roles
+      realtime.py                  WebSocket ConnectionManager + Redis pub/sub fan-out +
+                                    the SQLAlchemy after_commit broadcast hook
+      email.py                     outbound email (SMTP or dev-fallback console log)
+      schemas.py                   shared PaginationMeta / PaginatedResponse[T]
+      pagination.py                shared parse_sort() for all search endpoints
+    jobs/
+      check_deadlines.py           standalone script (run via cron) — DEADLINE_APPROACHING /
+                                    TASK_OVERDUE notifications
+    modules/
+      auth/        login, refresh, logout, change-password, forgot/reset-password
+      users/       user CRUD-ish admin ops, profile self-update, search
+      projects/    project CRUD, membership management
+      sprints/     sprint CRUD, close-sprint task migration
+      tasks/       task CRUD, status state machine, audit log, search (router.py + search_router.py)
+      comments/    comments + file attachments on tasks
+      dashboard/   per-project task stats
+      reporting/   CSV task export
+      notifications/  in-app notifications + the /ws realtime endpoint
+  tests/
+    test_suite.py                  the entire automated test suite (unittest), ~51 tests
+  nginx/
+    nginx.conf                     reverse proxy config for the `nginx` docker-compose service
+  docker-compose.yml                web, nginx, db (postgres), mailpit, redis
+  requirements.txt
+  .env.example                     documents every config key (see §9)
+frontend/                        Next.js 16 app — self-contained, own docker-compose.yml (§15)
 ```
 
 ## 4. Data Model
@@ -105,7 +116,7 @@ All PKs are UUIDs (`default=uuid.uuid4`, Python-side). All FKs use
 | `tasks` | project_id, sprint_id (nullable = backlog), title, `status` (TODO/IN_PROGRESS/IN_REVIEW/DONE/CANCELLED), `priority` (LOW/MEDIUM/HIGH/CRITICAL), assignee_id (nullable), reporter_id, due_date, estimated_hours, actual_hours, completed_at | |
 | `audit_logs` | task_id, actor_id, field_changed, old_value, new_value | written for assignee/priority/due_date/status changes only |
 | `comments` | task_id, author_id, content, is_edited | |
-| `attachments` | task_id, uploaded_by, original_name, storage_key (local filesystem path under `uploads/tasks/{task_id}/`), content_type, size_bytes | files stored on local disk, not object storage |
+| `attachments` | task_id, uploaded_by, original_name, storage_key (local filesystem path under `backend/uploads/tasks/{task_id}/`), content_type, size_bytes | files stored on local disk, not object storage |
 | `notifications` | recipient_id, `type` (enum, see §7), title, message, entity_type, entity_id, deduplication_key (nullable), is_read, read_at | |
 
 ## 5. Auth & Security Design
@@ -136,6 +147,12 @@ All PKs are UUIDs (`default=uuid.uuid4`, Python-side). All FKs use
   token as a `?token=` query param, validated via
   `get_user_from_access_token` (factored out of `get_current_user` for
   exactly this reuse).
+- `CORSMiddleware` (`app.py`, config via `settings.cors_origins_list`) is
+  needed because `frontend/` runs on its own origin during local dev
+  (`next dev` on :3000 vs. `uvicorn` on :8000, neither behind Nginx). Bearer
+  tokens live in the `Authorization` header, not a cookie, so
+  `allow_credentials=False`. Not relevant to the WebSocket endpoint —
+  browsers don't apply CORS to WS handshakes.
 
 ## 6. API Endpoints
 
@@ -195,7 +212,7 @@ router-level dependencies).
 | POST `/comments` | active project member or ADMIN | triggers `COMMENT_ADDED` to assignee+reporter (excl. author) |
 | GET `/comments` | active project member or ADMIN | |
 | DELETE `/comments/{comment_id}` | comment author, or PM/ADMIN | |
-| POST `/attachments` | active project member or ADMIN | validates extension+MIME+size (10MB default, `MAX_FILE_SIZE_BYTES`); stored under `uploads/tasks/{task_id}/` |
+| POST `/attachments` | active project member or ADMIN | validates extension+MIME+size (10MB default, `MAX_FILE_SIZE_BYTES`); stored under `backend/uploads/tasks/{task_id}/` |
 | GET `/attachments` | active project member or ADMIN | |
 
 ### Dashboard (`/api/v1/dashboard`)
@@ -227,7 +244,7 @@ router-level dependencies).
 | `TASK_UPDATED` | priority or due_date changed via `PATCH /tasks/{id}` | assignee |
 | `COMMENT_ADDED` | comment created | assignee + reporter |
 | `PROJECT_MEMBER_ADDED` | member added/reactivated | the added member |
-| `DEADLINE_APPROACHING` | due within 24h, active status (TODO/IN_PROGRESS/IN_REVIEW) — via `src/jobs/check_deadlines.py`, meant to run on a cron | assignee |
+| `DEADLINE_APPROACHING` | due within 24h, active status (TODO/IN_PROGRESS/IN_REVIEW) — via `backend/src/jobs/check_deadlines.py`, meant to run on a cron | assignee |
 | `TASK_OVERDUE` | due date passed, active status — same cron job | assignee + project MANAGER members |
 
 All notification creation goes through
@@ -238,7 +255,7 @@ re-running the cron job doesn't spam), and writes the row.
 
 **Realtime delivery** (added after the original spec, which explicitly
 marked this out of MVP scope): every notification is still a DB row (`GET
-/notifications` always works), but `src/core/realtime.py` also pushes it
+/notifications` always works), but `backend/src/core/realtime.py` also pushes it
 live over WebSocket:
 1. `create_event_notification()` flushes (to get id/created_at) and stashes
    a serialized dict on the SQLAlchemy session's `.info`.
@@ -300,15 +317,15 @@ delete.
 
 ## 9. Email
 
-`src/core/email.py`'s `send_email()`: if `SMTP_HOST` is unset, logs/prints
+`backend/src/core/email.py`'s `send_email()`: if `SMTP_HOST` is unset, logs/prints
 instead of sending (the "dev fallback" — keeps forgot-password fully
 testable with no mail server). Once `SMTP_HOST` is set, it sends for real —
 either to a self-hosted no-auth relay like the `mailpit` docker-compose
 service (leave `SMTP_USER`/`SMTP_PASSWORD` blank), or to a real provider
 (set those too). `forgot_password()` in `auth/service.py` wraps the send in
 try/except — an unreachable SMTP server never breaks the endpoint's uniform
-204 response, it's just logged. `docker-compose.yml`'s `mailpit` service
-exposes a web UI at `http://localhost:8025` to view captured mail.
+204 response, it's just logged. `backend/docker-compose.yml`'s `mailpit`
+service exposes a web UI at `http://localhost:8025` to view captured mail.
 
 ## 10. Search, Filter, Sort & Pagination Pattern
 
@@ -326,23 +343,23 @@ Project, Task, and User search all share the same contract
 
 ## 11. Infrastructure
 
-`docker-compose.yml` services:
+`backend/docker-compose.yml` services:
 
 | Service | Image | Purpose | Host-published port |
 |---|---|---|---|
-| `web` | built from `Dockerfile` | the API, `--reload` on, auto-wired to `db`/`mailpit`/`redis` env vars | not published directly — only reachable through `nginx` |
-| `nginx` | `nginx:alpine` | reverse proxy, single entrypoint; forwards WebSocket upgrade headers for `/notifications/ws` | `8080:80` (not `80` — Windows commonly can't bind it, see `nginx.conf`/README §3) |
+| `web` | built from `backend/Dockerfile` | the API, `--reload` on, auto-wired to `db`/`mailpit`/`redis` env vars | not published directly — only reachable through `nginx` |
+| `nginx` | `nginx:alpine` | reverse proxy, single entrypoint; forwards WebSocket upgrade headers for `/notifications/ws` | `8080:80` (not `80` — Windows commonly can't bind it, see `backend/nginx/nginx.conf`/`backend/README.md` §3) |
 | `db` | `postgres:15-alpine` | primary database | `5432:5432` |
 | `mailpit` | `axllent/mailpit` | dev SMTP relay + web inbox | `8025` (UI), `1025` (SMTP) |
 | `redis` | `redis:7-alpine` | realtime notification fan-out only (§7) — not a cache, not a task queue | `6379:6379` |
 
-Config keys: see `.env.example` (every key documented with which of the two
-contexts — inside vs. outside Docker — it applies to) and README §6's
-table.
+Config keys: see `backend/.env.example` (every key documented with which of
+the two contexts — inside vs. outside Docker — it applies to) and
+`backend/README.md` §6's table.
 
 ## 12. Testing
 
-Single file, `tests/test_suite.py`, run with:
+Single file, `backend/tests/test_suite.py`, run from within `backend/` with:
 ```
 python -m unittest tests.test_suite -v
 ```
@@ -375,26 +392,63 @@ auth + delivery, and Project/User search/filter/sort/pagination.
   project-membership scoping; this one enforces neither. Worth fixing to
   match the pattern used by dashboard/tasks/comments (`check_task_access`-
   style project-membership check).
+- **No `GET` endpoint lists a project's members** — `projects/router.py`
+  only exposes `POST /{id}/members` and `DELETE /{id}/members/{user_id}`,
+  no way to read the roster back. Surfaced while building `frontend/`: its
+  Members panel is add/remove-only (see `frontend/README.md`). Worth adding
+  a `GET /api/v1/projects/{id}/members` returning `List[MemberResponse]`
+  (join `ProjectMember` -> `User`), mirroring `sprints`' `list_sprints`.
 - Out of scope / not implemented (per spec §10.2, still true): PDF export
-  (CSV export exists), frontend UI, Celery, Elasticsearch, the "bonus"
-  features (AI assistant, OAuth logins, Kanban/Gantt views).
-- File attachments are stored on local disk (`uploads/tasks/{task_id}/`),
+  (CSV export exists), Celery, Elasticsearch, the "bonus" features (AI
+  assistant, OAuth logins, Kanban/Gantt views). A frontend UI has since
+  been added — see §15.
+- File attachments are stored on local disk (`backend/uploads/tasks/{task_id}/`),
   not object storage — fine for a single-instance dev setup, would need
   revisiting (e.g. S3-compatible storage) before running `web` as multiple
   replicas, since replicas don't share a filesystem.
 - `GET /api/v1/tasks/{id}/audit-logs` requires login but doesn't check the
   caller has access to that task's project (unlike comments/attachments,
   which use `check_task_access`).
+- **No `GET /api/v1/tasks/{id}`** (single-task fetch) — `frontend/`'s task
+  detail page works around this by re-fetching the project's task list and
+  finding the task by id, which is one extra request and doesn't scale past
+  a project's first page of tasks. Worth adding for a real single-task
+  fetch.
 
-## 14. Quick Reference — "Where do I change X?"
+## 15. Frontend (`frontend/`)
+
+Next.js 16 (App Router, TypeScript, Tailwind v4), a real client of this API
+— not a mockup. Client-side auth only (no cookies): access + refresh tokens
+in `localStorage` (`src/lib/token-store.ts`), a single-flight refresh on any
+401 (`src/lib/api.ts`), and a typed wrapper per backend route
+(`src/lib/endpoints.ts`) built directly from this document's §6. Structure:
+
+| Path | Responsibility |
+|---|---|
+| `src/lib/api.ts` | fetch wrapper: auth header injection, 401 -> refresh -> retry once, error shape parsing |
+| `src/lib/endpoints.ts` | one typed function per backend route, grouped by module |
+| `src/lib/types.ts` | TS mirror of `schemas.py` response models |
+| `src/lib/auth-context.tsx` | `AuthProvider`/`useAuth` — login/logout, current user |
+| `src/lib/use-notifications-socket.ts` | the `/notifications/ws` client, reconnects with backoff |
+| `src/app/(app)/` | everything behind the auth guard: dashboard, projects, board, task detail, notifications, admin users |
+
+Two real backend gaps shaped its scope (both listed in §13): no
+project-members roster endpoint (Members panel is add/remove-only) and no
+single-task `GET` (task detail re-fetches the project's task list and finds
+the task by id). Design tokens (oklch palette, IBM Plex Sans/Mono) match the
+Claude Design canvas this app's UI was drafted from.
+
+See `frontend/README.md` for how to run it against this API.
+
+## 16. Quick Reference — "Where do I change X?"
 
 | Task | File(s) |
 |---|---|
 | Add/change a permission rule for an existing endpoint | that module's `service.py` (permission checks are inline, not router dependencies, except `require_roles` for a few admin-only routes) |
 | Add a new notification type/trigger | the triggering module's `service.py` (call `notifications.service.create_event_notification`) + add the enum value in `notifications/models.py::NotificationType` |
-| Change JWT/token lifetimes | `src/core/security.py` (`ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `PASSWORD_RESET_TOKEN_EXPIRE_MINUTES`) |
+| Change JWT/token lifetimes | `backend/src/core/security.py` (`ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `PASSWORD_RESET_TOKEN_EXPIRE_MINUTES`) |
 | Add a new searchable/sortable field to Project/Task/User | that module's `service.py`'s `*_SORT_ALLOWLIST` dict |
-| Change email content/behavior | `src/modules/auth/service.py::forgot_password` (content) or `src/core/email.py` (transport) |
-| Change realtime notification behavior | `src/core/realtime.py` (all of it lives there) |
+| Change email content/behavior | `backend/src/modules/auth/service.py::forgot_password` (content) or `backend/src/core/email.py` (transport) |
+| Change realtime notification behavior | `backend/src/core/realtime.py` (all of it lives there) |
 | Add a new module | mirror an existing one: `models.py` + `schemas.py` + `service.py` + `router.py`, then register the router in `app.py` |
-| Add a config value | `src/config.py` (`Settings` class) + `.env.example` + README §6 table |
+| Add a config value | `backend/src/config.py` (`Settings` class) + `backend/.env.example` + `backend/README.md` §6 table |
