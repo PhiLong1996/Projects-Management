@@ -4,12 +4,26 @@ import { Suspense, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { CenteredSpinner, ErrorBanner, PageHeader, StatusBadge } from "@/components/ui";
+import { Avatar, CenteredSpinner, ErrorBanner, PageHeader, StatusBadge } from "@/components/ui";
 import { PlusIcon, SearchIcon } from "@/components/icons";
 import { projectsApi, sprintsApi, usersApi } from "@/lib/endpoints";
 import { useAuth } from "@/lib/auth-context";
-import type { Project, ProjectStatus, Sprint, User } from "@/lib/types";
+import type { Project, ProjectMemberWithUser, ProjectStatus, Sprint, User } from "@/lib/types";
 import { ApiError } from "@/lib/api";
+
+const PROJECT_ROLE_COLOR: Record<"MANAGER" | "MEMBER", { bg: string; fg: string }> = {
+  MANAGER: { bg: "var(--accent-subtle)", fg: "var(--accent-subtle-text)" },
+  MEMBER: { bg: "var(--bg-subtle)", fg: "var(--text-muted)" },
+};
+
+function ProjectRoleBadge({ role }: { role: "MANAGER" | "MEMBER" }) {
+  const c = PROJECT_ROLE_COLOR[role];
+  return (
+    <span className="badge" style={{ background: c.bg, color: c.fg }}>
+      {role === "MANAGER" ? "Manager" : "Member"}
+    </span>
+  );
+}
 
 // Converts a Project's ISO date string (or null) into the yyyy-mm-dd shape
 // an <input type="date"> expects.
@@ -343,7 +357,7 @@ function MemberPicker({ selected, onSelect }: { selected: User | null; onSelect:
   );
 }
 
-function AddMemberForm({ projectId }: { projectId: string }) {
+function AddMemberForm({ projectId, onAdded }: { projectId: string; onAdded: () => void }) {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [role, setRole] = useState<"MEMBER" | "MANAGER">("MEMBER");
   const [error, setError] = useState<string | null>(null);
@@ -360,6 +374,7 @@ function AddMemberForm({ projectId }: { projectId: string }) {
       await projectsApi.addMember(projectId, selectedUser.id, role);
       setSuccess(`${selectedUser.full_name} added.`);
       setSelectedUser(null);
+      onAdded();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to add member.");
     } finally {
@@ -393,6 +408,36 @@ function AddMemberForm({ projectId }: { projectId: string }) {
   );
 }
 
+function MemberRow({
+  member,
+  removing,
+  onRemove,
+}: {
+  member: ProjectMemberWithUser;
+  removing: boolean;
+  onRemove: () => void;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: "1px solid var(--border)" }}>
+      <Avatar name={member.user.full_name} size={26} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>{member.user.full_name}</div>
+        <div style={{ fontSize: 11.5, color: "var(--text-faint)" }}>{member.user.email}</div>
+      </div>
+      <ProjectRoleBadge role={member.project_role} />
+      <button
+        type="button"
+        onClick={onRemove}
+        disabled={removing}
+        title="Remove from project"
+        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-faint)", fontSize: 12 }}
+      >
+        {removing ? "Removing…" : "Remove"}
+      </button>
+    </div>
+  );
+}
+
 function ProjectsPageInner() {
   const { user } = useAuth();
   // Set when arriving from a notification like "You were added to project
@@ -409,6 +454,10 @@ function ProjectsPageInner() {
   const [editingProject, setEditingProject] = useState(false);
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [sprintsLoading, setSprintsLoading] = useState(false);
+  const [members, setMembers] = useState<ProjectMemberWithUser[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [removingUserId, setRemovingUserId] = useState<string | null>(null);
 
   const canCreateProject = user?.system_role === "ADMIN" || user?.system_role === "PROJECT_MANAGER";
 
@@ -449,6 +498,38 @@ function ProjectsPageInner() {
       .catch(() => setSprints([]))
       .finally(() => setSprintsLoading(false));
   }, [selectedId]);
+
+  function loadMembers(projectId: string) {
+    setMembersLoading(true);
+    setMembersError(null);
+    projectsApi
+      .listMembers(projectId)
+      .then(setMembers)
+      .catch((e) => {
+        setMembers([]);
+        setMembersError(e instanceof ApiError ? e.message : "Failed to load members.");
+      })
+      .finally(() => setMembersLoading(false));
+  }
+
+  useEffect(() => {
+    if (!selectedId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadMembers() sets loading state before its fetch starts
+    loadMembers(selectedId);
+  }, [selectedId]);
+
+  async function removeMember(projectId: string, userId: string) {
+    setRemovingUserId(userId);
+    setMembersError(null);
+    try {
+      await projectsApi.removeMember(projectId, userId);
+      setMembers((prev) => prev.filter((m) => m.user_id !== userId));
+    } catch (err) {
+      setMembersError(err instanceof ApiError ? err.message : "Failed to remove member.");
+    } finally {
+      setRemovingUserId(null);
+    }
+  }
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- closes any open edit form when the selection changes
@@ -580,13 +661,32 @@ function ProjectsPageInner() {
                 <NewSprintForm projectId={selected.id} onCreated={(s) => setSprints((prev) => [...prev, s])} />
               </div>
 
-              <div className="card" style={{ padding: 20 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Add member</div>
-                <div style={{ fontSize: 12, color: "var(--text-faint)", marginBottom: 12 }}>
-                  The backend doesn&apos;t yet expose a list-members endpoint, so membership can be
-                  managed here but not browsed as a roster.
+              <div className="card">
+                <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", fontSize: 14, fontWeight: 600 }}>
+                  Members
                 </div>
-                <AddMemberForm projectId={selected.id} />
+                {membersError && (
+                  <div style={{ padding: "10px 16px 0" }}>
+                    <ErrorBanner message={membersError} />
+                  </div>
+                )}
+                {membersLoading ? (
+                  <CenteredSpinner />
+                ) : members.length === 0 ? (
+                  <div style={{ padding: 20, fontSize: 13, color: "var(--text-muted)" }}>No members yet.</div>
+                ) : (
+                  members.map((m) => (
+                    <MemberRow
+                      key={m.id}
+                      member={m}
+                      removing={removingUserId === m.user_id}
+                      onRemove={() => removeMember(selected.id, m.user_id)}
+                    />
+                  ))
+                )}
+                <div style={{ padding: 16, borderTop: "1px solid var(--border)" }}>
+                  <AddMemberForm projectId={selected.id} onAdded={() => loadMembers(selected.id)} />
+                </div>
               </div>
             </div>
           )}

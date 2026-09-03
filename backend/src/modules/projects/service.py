@@ -1,10 +1,11 @@
 """Business logic for project management and project membership."""
 import math
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, func, or_, asc, desc
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.pagination import parse_sort
@@ -272,6 +273,39 @@ async def add_project_member(
 
     await _notify_member_added(db, project_id, payload.user_id, current_user)
     return new_member
+
+
+async def list_project_members(
+    db: AsyncSession, current_user: User, project_id: uuid.UUID
+) -> List[ProjectMember]:
+    # AC-04 roster view: Administrator sees any project's roster; everyone
+    # else must be an active member of this project to see who else is on it.
+    project_res = await db.execute(select(Project).where(Project.id == project_id))
+    project = project_res.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    if current_user.system_role != SystemRole.ADMIN:
+        member_check = await db.execute(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == current_user.id,
+                ProjectMember.is_active == True,
+            )
+        )
+        if not member_check.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not a member of this project.",
+            )
+
+    result = await db.execute(
+        select(ProjectMember)
+        .where(ProjectMember.project_id == project_id, ProjectMember.is_active == True)
+        .options(selectinload(ProjectMember.user))
+        .order_by(ProjectMember.joined_at.asc())
+    )
+    return result.scalars().all()
 
 
 async def remove_project_member(

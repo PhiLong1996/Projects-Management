@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional
+from typing import List, Optional
 from fastapi import APIRouter, Depends, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from src.modules.projects.schemas import (
     AddMemberRequest,
     RemoveMemberRequest,
     MemberResponse,
+    ProjectMemberWithUser,
 )
 
 router = APIRouter(prefix="/projects", tags=["Project Management"])
@@ -70,6 +71,15 @@ async def add_project_member(
     current_user: User = Depends(get_current_user),
 ):
     return await service.add_project_member(db, current_user, project_id, payload)
+
+
+@router.get("/{project_id}/members", response_model=List[ProjectMemberWithUser])
+async def list_project_members(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await service.list_project_members(db, current_user, project_id)
 
 
 @router.delete("/{project_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

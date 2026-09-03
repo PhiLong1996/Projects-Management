@@ -78,6 +78,16 @@ export interface ProjectMember {
   joined_at: string;
 }
 
+export interface ProjectMemberWithUser extends ProjectMember {
+  user: {
+    id: string;
+    full_name: string;
+    email: string;
+    system_role: SystemRole;
+    status: UserStatus;
+  };
+}
+
 export interface Sprint {
   id: string;
   project_id: string;

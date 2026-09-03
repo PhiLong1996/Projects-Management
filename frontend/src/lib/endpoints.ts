@@ -12,6 +12,7 @@ import type {
   PaginatedResponse,
   Project,
   ProjectMember,
+  ProjectMemberWithUser,
   Sprint,
   Task,
   TaskPriority,
@@ -57,6 +58,7 @@ export const projectsApi = {
     api.post<ProjectMember>(`/projects/${projectId}/members`, { user_id, project_role }),
   removeMember: (projectId: string, userId: string, reassign_to_user_id?: string) =>
     api.delete<void>(`/projects/${projectId}/members/${userId}`, { reassign_to_user_id }),
+  listMembers: (projectId: string) => api.get<ProjectMemberWithUser[]>(`/projects/${projectId}/members`),
 };
 
 // --- Sprints ---

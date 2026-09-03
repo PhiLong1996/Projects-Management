@@ -3,6 +3,7 @@ from datetime import date, datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator, model_validator
 from src.modules.projects.models import ProjectStatus, ProjectRole
+from src.modules.users.models import SystemRole, UserStatus
 
 
 # --- Project Schemas ---
@@ -66,6 +67,30 @@ class MemberResponse(BaseModel):
     project_role: ProjectRole
     is_active: bool
     joined_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectMemberUser(BaseModel):
+    id: uuid.UUID
+    full_name: str
+    email: str
+    system_role: SystemRole
+    status: UserStatus
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectMemberWithUser(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    user_id: uuid.UUID
+    project_role: ProjectRole
+    is_active: bool
+    joined_at: datetime
+    user: ProjectMemberUser
 
     class Config:
         from_attributes = True
