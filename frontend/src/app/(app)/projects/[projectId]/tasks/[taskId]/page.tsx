@@ -8,6 +8,7 @@ import { commentsApi, projectsApi, sprintsApi, tasksApi, usersApi } from "@/lib/
 import { useAuth } from "@/lib/auth-context";
 import type { Attachment, AuditLog, Comment, Project, Sprint, Task, TaskPriority, TaskStatus, User } from "@/lib/types";
 import { ApiError } from "@/lib/api";
+import { parseApiDate } from "@/lib/date";
 
 const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   TODO: ["IN_PROGRESS", "CANCELLED"],
@@ -19,7 +20,7 @@ const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
 
 function fmtDateTime(d: string | null): string {
   if (!d) return "—";
-  return new Date(d).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return parseApiDate(d).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {

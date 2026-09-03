@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { CenteredSpinner, EmptyState, ErrorBanner, NOTIFICATION_LABEL, PageHeader } from "@/components/ui";
 import { CheckIcon } from "@/components/icons";
-import { notificationsApi } from "@/lib/endpoints";
+import { notificationsApi, projectsApi, tasksApi } from "@/lib/endpoints";
 import { useNotificationsSocket } from "@/lib/use-notifications-socket";
 import { useAuth } from "@/lib/auth-context";
+import { parseApiDate } from "@/lib/date";
 import type { Notification } from "@/lib/types";
 import { ApiError } from "@/lib/api";
 
 function timeAgo(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
+  const diffMs = Date.now() - parseApiDate(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
@@ -22,12 +24,30 @@ function timeAgo(iso: string): string {
   return `${days} days ago`;
 }
 
+// There's no "get task by id" endpoint — the task's project has to be found
+// by checking each project's task list. Used only when opening a TASK
+// notification, so the cost is paid on click rather than on every load.
+async function findTaskProjectId(taskId: string): Promise<string | null> {
+  const projects = await projectsApi.list({ page_size: 100 });
+  const hits = await Promise.all(
+    projects.items.map((p) =>
+      tasksApi
+        .listForProject(p.id, { page_size: 100 })
+        .then((r) => (r.items.some((t) => t.id === taskId) ? p.id : null))
+        .catch(() => null)
+    )
+  );
+  return hits.find((id): id is string => id !== null) ?? null;
+}
+
 export default function NotificationsPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const [items, setItems] = useState<Notification[]>([]);
   const [filter, setFilter] = useState<"all" | "unread">("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
 
   function load(f: "all" | "unread") {
     setLoading(true);
@@ -60,6 +80,29 @@ export default function NotificationsPage() {
       setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't mark all as read.");
+    }
+  }
+
+  async function openNotification(n: Notification) {
+    if (!n.is_read) markRead(n.id);
+    if (!n.entity_type || !n.entity_id || openingId) return;
+
+    if (n.entity_type === "PROJECT") {
+      router.push(`/projects?select=${n.entity_id}`);
+      return;
+    }
+    if (n.entity_type === "TASK") {
+      setOpeningId(n.id);
+      try {
+        const projectId = await findTaskProjectId(n.entity_id);
+        if (projectId) {
+          router.push(`/projects/${projectId}/tasks/${n.entity_id}`);
+        } else {
+          setError("Couldn't find that task — it may have been deleted.");
+        }
+      } finally {
+        setOpeningId(null);
+      }
     }
   }
 
@@ -120,36 +163,47 @@ export default function NotificationsPage() {
           <EmptyState title="You're all caught up" hint="New notifications will show up here in realtime." />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {items.map((n) => (
-              <div
-                key={n.id}
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 14,
-                  padding: "14px 12px",
-                  borderRadius: 10,
-                  background: n.is_read ? "transparent" : "var(--accent-subtle)",
-                  color: "var(--text)",
-                }}
-              >
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13.5, lineHeight: 1.5 }}>
-                    <span style={{ fontWeight: 600 }}>{NOTIFICATION_LABEL[n.type]}:</span> {n.message}
+            {items.map((n) => {
+              const clickable = !!n.entity_type && !!n.entity_id;
+              return (
+                <div
+                  key={n.id}
+                  onClick={clickable ? () => openNotification(n) : undefined}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 14,
+                    padding: "14px 12px",
+                    borderRadius: 10,
+                    background: n.is_read ? "transparent" : "var(--accent-subtle)",
+                    color: "var(--text)",
+                    cursor: clickable ? "pointer" : "default",
+                    opacity: openingId === n.id ? 0.6 : 1,
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13.5, lineHeight: 1.5 }}>
+                      <span style={{ fontWeight: 600 }}>{NOTIFICATION_LABEL[n.type]}:</span> {n.message}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--text-faint)", marginTop: 3 }}>
+                      {openingId === n.id ? "Opening…" : timeAgo(n.created_at)}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 12, color: "var(--text-faint)", marginTop: 3 }}>{timeAgo(n.created_at)}</div>
+                  {!n.is_read && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        markRead(n.id);
+                      }}
+                      title="Mark as read"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", padding: 4 }}
+                    >
+                      <CheckIcon width={15} height={15} />
+                    </button>
+                  )}
                 </div>
-                {!n.is_read && (
-                  <button
-                    onClick={() => markRead(n.id)}
-                    title="Mark as read"
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", padding: 4 }}
-                  >
-                    <CheckIcon width={15} height={15} />
-                  </button>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

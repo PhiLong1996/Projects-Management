@@ -9,10 +9,11 @@ import { usersApi } from "@/lib/endpoints";
 import { useAuth } from "@/lib/auth-context";
 import type { SystemRole, User, UserStatus } from "@/lib/types";
 import { ApiError } from "@/lib/api";
+import { parseApiDate } from "@/lib/date";
 
 function fmtLastActive(iso: string | null): string {
   if (!iso) return "Never";
-  const diffMs = Date.now() - new Date(iso).getTime();
+  const diffMs = Date.now() - parseApiDate(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.floor(mins / 60);

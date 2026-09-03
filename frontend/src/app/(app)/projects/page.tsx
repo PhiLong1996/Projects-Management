@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { CenteredSpinner, ErrorBanner, PageHeader, StatusBadge } from "@/components/ui";
 import { PlusIcon, SearchIcon } from "@/components/icons";
@@ -392,8 +393,13 @@ function AddMemberForm({ projectId }: { projectId: string }) {
   );
 }
 
-export default function ProjectsPage() {
+function ProjectsPageInner() {
   const { user } = useAuth();
+  // Set when arriving from a notification like "You were added to project
+  // X" (?select=<projectId>) — picked over the default first-project pick,
+  // but only on that initial load, so it doesn't fight later selections.
+  const searchParams = useSearchParams();
+  const selectParam = searchParams.get("select");
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -412,7 +418,10 @@ export default function ProjectsPage() {
       .list({ page_size: 100, search: search || undefined })
       .then((res) => {
         setProjects(res.items);
-        if (!selectedId && res.items.length > 0) setSelectedId(res.items[0].id);
+        if (!selectedId && res.items.length > 0) {
+          const wanted = selectParam && res.items.some((p) => p.id === selectParam) ? selectParam : res.items[0].id;
+          setSelectedId(wanted);
+        }
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : "Failed to load projects."))
       .finally(() => setLoading(false));
@@ -584,5 +593,14 @@ export default function ProjectsPage() {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+export default function ProjectsPage() {
+  // useSearchParams() needs a Suspense boundary above it in the app router.
+  return (
+    <Suspense fallback={<AppShell active="projects"><CenteredSpinner /></AppShell>}>
+      <ProjectsPageInner />
+    </Suspense>
   );
 }
