@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { notificationsApi } from "@/lib/endpoints";
 import { useNotificationsSocket } from "@/lib/use-notifications-socket";
@@ -11,30 +10,10 @@ import { AdminIcon, BellIcon, BoardIcon, DashboardIcon, LogoMark, ProjectsIcon }
 
 type NavKey = "dashboard" | "board" | "projects" | "notifications" | "admin";
 
-// Same key use-selected-project.ts writes to — the sidebar has no project
-// list of its own to derive a "current project" from, so it reads the same
-// localStorage value directly.
-const SELECTED_PROJECT_KEY = "taskflow.selected_project_id";
-
-function NavItem({
-  href,
-  icon,
-  label,
-  active,
-  badge,
-  onClick,
-}: {
-  href: string;
-  icon: ReactNode;
-  label: string;
-  active: boolean;
-  badge?: number;
-  onClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
-}) {
+function NavItem({ href, icon, label, active, badge }: { href: string; icon: ReactNode; label: string; active: boolean; badge?: number }) {
   return (
     <Link
       href={href}
-      onClick={onClick}
       style={{
         display: "flex",
         alignItems: "center",
@@ -77,14 +56,8 @@ function NavItem({
 
 export function AppShell({ active, children }: { active: NavKey; children: ReactNode }) {
   const { user, logout } = useAuth();
-  const router = useRouter();
   const [unread, setUnread] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
-  // Falls back to /projects (pick a project first) until a project has
-  // ever been selected; kept as state so the link looks right at rest, but
-  // re-read fresh from localStorage on click (see goToBoard) since this
-  // shell instance may have mounted before the user switched projects.
-  const [boardHref, setBoardHref] = useState("/projects");
 
   useEffect(() => {
     let cancelled = false;
@@ -100,22 +73,6 @@ export function AppShell({ active, children }: { active: NavKey; children: React
   }, []);
 
   useNotificationsSocket(() => setUnread((n) => n + 1), !!user);
-
-  useEffect(() => {
-    const stored = typeof window !== "undefined" ? window.localStorage.getItem(SELECTED_PROJECT_KEY) : null;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrating from localStorage, can't run on the server
-    if (stored) setBoardHref(`/projects/${stored}/board`);
-  }, []);
-
-  function goToBoard(e: MouseEvent<HTMLAnchorElement>) {
-    const stored = typeof window !== "undefined" ? window.localStorage.getItem(SELECTED_PROJECT_KEY) : null;
-    if (stored) {
-      e.preventDefault();
-      router.push(`/projects/${stored}/board`);
-    }
-    // else: nothing selected yet — let the Link fall through to /projects
-    // so the user can pick one (its "Open board" button links in correctly).
-  }
 
   const isAdmin = user?.system_role === "ADMIN";
 
@@ -137,7 +94,7 @@ export function AppShell({ active, children }: { active: NavKey; children: React
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <NavItem href="/dashboard" icon={<DashboardIcon />} label="Dashboard" active={active === "dashboard"} />
-          <NavItem href={boardHref} icon={<BoardIcon />} label="Board" active={active === "board"} onClick={goToBoard} />
+          <NavItem href="/board" icon={<BoardIcon />} label="Board" active={active === "board"} />
           <NavItem href="/projects" icon={<ProjectsIcon />} label="Projects" active={active === "projects"} />
           <NavItem
             href="/notifications"
