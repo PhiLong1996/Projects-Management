@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Breakpoints in Server Components, route handlers, middleware, and
+      // anything else that runs in Node (not the browser). Runs `npm run
+      // dev` in an integrated terminal under the debugger — open
+      // http://localhost:3000 yourself once it's ready.
+      "name": "Frontend: Debug server-side (Next.js)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      // Breakpoints in Client Components and anything else that runs in the
+      // browser. Attaches Chrome to an ALREADY-RUNNING dev server — start
+      // "Frontend: Debug server-side" (or a plain `npm run dev` terminal)
+      // first, then launch this one.
+      "name": "Frontend: Debug client-side (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}"
+    },
+    {
+      // One F5 for both: starts the dev server, waits for it to report
+      // ready, then opens Chrome attached to the debugger automatically.
+      // The one to reach for day to day — breakpoints work in both server
+      // and client code without juggling two launches.
+      "name": "Frontend: Debug full stack",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}",
+      "serverReadyAction": {
+        "pattern": "- Local:.+(https?://.+)",
+        "uriFormat": "%s",
+        "action": "debugWithChrome"
+      }
+    }
+  ]
+}
