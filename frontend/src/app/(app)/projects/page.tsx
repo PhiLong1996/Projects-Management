@@ -237,33 +237,128 @@ function NewSprintForm({ projectId, onCreated }: { projectId: string; onCreated:
   );
 }
 
+// Searchable "type to find a person" combobox. Debounces GET /users with
+// the typed query (an empty query still fires, so focusing the field shows
+// a recommended list of the first alphabetical page rather than nothing).
+function MemberPicker({ selected, onSelect }: { selected: User | null; onSelect: (u: User | null) => void }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<User[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (selected) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets loading state before the debounced fetch starts
+    setSearching(true);
+    const t = setTimeout(() => {
+      usersApi
+        .list({ search: query.trim() || undefined, page_size: 20, sort_by: "full_name" })
+        .then((res) => {
+          setResults(res.items);
+          setSearchError(null);
+        })
+        .catch((err) => {
+          setResults([]);
+          setSearchError(err instanceof ApiError ? err.message : "Couldn't load users.");
+        })
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query, selected]);
+
+  if (selected) {
+    return (
+      <div className="input" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: 13 }}>
+          {selected.full_name} <span style={{ color: "var(--text-faint)" }}>({selected.email})</span>
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            onSelect(null);
+            setQuery("");
+          }}
+          style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--accent)", fontSize: 12.5 }}
+        >
+          Change
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        className="input"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Search by name or email…"
+        autoComplete="off"
+      />
+      {open && (
+        <div
+          className="card"
+          style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 20, maxHeight: 240, overflowY: "auto", padding: 4 }}
+        >
+          {searching ? (
+            <div style={{ padding: 10, fontSize: 12.5, color: "var(--text-muted)" }}>Searching…</div>
+          ) : searchError ? (
+            <div style={{ padding: 10, fontSize: 12.5, color: "var(--red)" }}>{searchError}</div>
+          ) : results.length === 0 ? (
+            <div style={{ padding: 10, fontSize: 12.5, color: "var(--text-muted)" }}>
+              {query ? "No matching people." : "No users found."}
+            </div>
+          ) : (
+            <>
+              {!query && (
+                <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                  Suggested
+                </div>
+              )}
+              {results.map((u) => (
+                <div
+                  key={u.id}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    onSelect(u);
+                    setOpen(false);
+                  }}
+                  style={{ padding: "8px 10px", borderRadius: 6, cursor: "pointer" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-subtle)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{u.full_name}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-faint)" }}>{u.email}</div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AddMemberForm({ projectId }: { projectId: string }) {
-  const [users, setUsers] = useState<User[]>([]);
-  const [usersLoading, setUsersLoading] = useState(true);
-  const [userId, setUserId] = useState("");
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [role, setRole] = useState<"MEMBER" | "MANAGER">("MEMBER");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    usersApi
-      .list({ page_size: 200, sort_by: "full_name" })
-      .then((res) => setUsers(res.items))
-      .catch(() => setUsers([]))
-      .finally(() => setUsersLoading(false));
-  }, []);
-
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (!selectedUser) return;
     setError(null);
     setSuccess(null);
     setSubmitting(true);
     try {
-      await projectsApi.addMember(projectId, userId, role);
-      const added = users.find((u) => u.id === userId);
-      setSuccess(added ? `${added.full_name} added.` : "Member added.");
-      setUserId("");
+      await projectsApi.addMember(projectId, selectedUser.id, role);
+      setSuccess(`${selectedUser.full_name} added.`);
+      setSelectedUser(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to add member.");
     } finally {
@@ -279,24 +374,9 @@ function AddMemberForm({ projectId }: { projectId: string }) {
         </div>
       )}
       {success && <div style={{ width: "100%", fontSize: 12.5, color: "var(--green)" }}>{success}</div>}
-      <div style={{ flex: "1 1 220px" }}>
+      <div style={{ flex: "1 1 260px" }}>
         <label className="label">Member</label>
-        <select
-          className="input"
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
-          required
-          disabled={usersLoading}
-        >
-          <option value="" disabled>
-            {usersLoading ? "Loading users…" : "Select a person"}
-          </option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.full_name} ({u.email})
-            </option>
-          ))}
-        </select>
+        <MemberPicker selected={selectedUser} onSelect={setSelectedUser} />
       </div>
       <div>
         <label className="label">Role</label>
@@ -305,7 +385,7 @@ function AddMemberForm({ projectId }: { projectId: string }) {
           <option value="MANAGER">Manager</option>
         </select>
       </div>
-      <button type="submit" className="btn btn-primary" disabled={submitting || usersLoading}>
+      <button type="submit" className="btn btn-primary" disabled={submitting || !selectedUser}>
         {submitting ? "Adding…" : "Add member"}
       </button>
     </form>

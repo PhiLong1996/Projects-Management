@@ -6,9 +6,9 @@ import { useAuth } from "@/lib/auth-context";
 import { notificationsApi } from "@/lib/endpoints";
 import { useNotificationsSocket } from "@/lib/use-notifications-socket";
 import { Avatar } from "./ui";
-import { AdminIcon, BellIcon, BoardIcon, DashboardIcon, LogoMark, ProjectsIcon } from "./icons";
+import { AdminIcon, BellIcon, BoardIcon, DashboardIcon, LogoMark, ProjectsIcon, SprintIcon, TaskIcon } from "./icons";
 
-type NavKey = "dashboard" | "board" | "projects" | "notifications" | "admin";
+type NavKey = "dashboard" | "board" | "projects" | "sprints" | "tasks" | "notifications" | "admin";
 
 function NavItem({ href, icon, label, active, badge }: { href: string; icon: ReactNode; label: string; active: boolean; badge?: number }) {
   return (
@@ -96,6 +96,8 @@ export function AppShell({ active, children }: { active: NavKey; children: React
           <NavItem href="/dashboard" icon={<DashboardIcon />} label="Dashboard" active={active === "dashboard"} />
           <NavItem href="/board" icon={<BoardIcon />} label="Board" active={active === "board"} />
           <NavItem href="/projects" icon={<ProjectsIcon />} label="Projects" active={active === "projects"} />
+          <NavItem href="/sprints" icon={<SprintIcon />} label="Sprints" active={active === "sprints"} />
+          <NavItem href="/tasks" icon={<TaskIcon />} label="Tasks" active={active === "tasks"} />
           <NavItem
             href="/notifications"
             icon={<BellIcon />}
