@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Set
+from typing import List, Set
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     # frontend's reset-password page actually lives.
     frontend_url: str = "http://localhost:3000"
 
+    # --- CORS ---
+    # Comma-separated list of origins allowed to call this API from a
+    # browser. Needed because the frontend/ Next.js app runs on its own
+    # origin during local dev (`next dev` on :3000, or Nginx on :8080 under
+    # the full docker-compose stack) — neither is this API's own origin.
+    cors_origins: str = "http://localhost:3000,http://localhost:8080"
+
     # --- Realtime notification delivery (WebSocket + Redis pub/sub) ---
     # Redis is only the fan-out layer between app instances/workers — each
     # instance still pushes to its own locally-connected WebSocket clients.
@@ -57,6 +64,10 @@ class Settings(BaseSettings):
     allowed_extensions: Set[str] = {
         ".jpg", ".jpeg", ".png", ".gif", ".pdf", ".doc", ".docx", ".txt",
     }
+
+    @property
+    def cors_origins_list(self) -> List[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE_PATH, env_file_encoding="utf-8", extra="ignore"

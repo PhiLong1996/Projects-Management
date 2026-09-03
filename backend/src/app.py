@@ -2,6 +2,8 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from src.config import get_settings
 from src.database import async_engine, Base
 from src.core.realtime import redis_subscriber_loop
 from src.modules.auth.router import router as auth_router
@@ -79,6 +81,18 @@ app = FastAPI(
     title="Smart Task Management System API",
     version="1.0.0",
     lifespan=lifespan
+)
+
+# Lets the Next.js frontend (see config.py's `cors_origins` comment) call
+# this API from a different origin during local dev. `allow_credentials` is
+# left False since auth is a bearer token in the Authorization header, not a
+# cookie — nothing here relies on the browser sending credentials.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_settings().cors_origins_list,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Route Registrations
