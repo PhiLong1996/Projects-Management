@@ -5,10 +5,17 @@ import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { CenteredSpinner, ErrorBanner, PageHeader, StatusBadge } from "@/components/ui";
 import { PlusIcon, SearchIcon } from "@/components/icons";
-import { projectsApi, sprintsApi } from "@/lib/endpoints";
+import { projectsApi, sprintsApi, usersApi } from "@/lib/endpoints";
 import { useAuth } from "@/lib/auth-context";
-import type { Project, Sprint } from "@/lib/types";
+import type { Project, ProjectStatus, Sprint, User } from "@/lib/types";
 import { ApiError } from "@/lib/api";
+
+// Converts a Project's ISO date string (or null) into the yyyy-mm-dd shape
+// an <input type="date"> expects.
+function toDateInputValue(d: string | null): string {
+  if (!d) return "";
+  return d.slice(0, 10);
+}
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
@@ -19,6 +26,8 @@ function NewProjectForm({ onCreated, onCancel }: { onCreated: (p: Project) => vo
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -27,7 +36,13 @@ function NewProjectForm({ onCreated, onCancel }: { onCreated: (p: Project) => vo
     setError(null);
     setSubmitting(true);
     try {
-      const project = await projectsApi.create({ code, name, description: description || undefined });
+      const project = await projectsApi.create({
+        code,
+        name,
+        description: description || undefined,
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
+      });
       onCreated(project);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create project.");
@@ -51,6 +66,16 @@ function NewProjectForm({ onCreated, onCancel }: { onCreated: (p: Project) => vo
         <label className="label">Description</label>
         <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" />
       </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <label className="label">Start date</label>
+          <input className="input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="label">End date</label>
+          <input className="input" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={startDate || undefined} />
+        </div>
+      </div>
       <div style={{ display: "flex", gap: 8 }}>
         <button type="submit" className="btn btn-primary" disabled={submitting}>
           {submitting ? "Creating…" : "Create project"}
@@ -63,15 +88,102 @@ function NewProjectForm({ onCreated, onCancel }: { onCreated: (p: Project) => vo
   );
 }
 
-function SprintRow({ sprint }: { sprint: Sprint }) {
+function EditProjectForm({ project, onSaved, onCancel }: { project: Project; onSaved: (p: Project) => void; onCancel: () => void }) {
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description ?? "");
+  const [status, setStatus] = useState<ProjectStatus>(project.status);
+  const [startDate, setStartDate] = useState(toDateInputValue(project.start_date));
+  const [endDate, setEndDate] = useState(toDateInputValue(project.end_date));
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      const updated = await projectsApi.update(project.id, {
+        name,
+        description: description || undefined,
+        status,
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
+      });
+      onSaved(updated);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update project.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
+    <form onSubmit={submit} className="card" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+      {error && <ErrorBanner message={error} />}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span className="mono" style={{ fontSize: 12, color: "var(--text-faint)" }}>{project.code}</span>
+        <span style={{ fontSize: 12, color: "var(--text-faint)" }}>(code can&apos;t be changed)</span>
+      </div>
+      <div>
+        <label className="label">Name</label>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
+      </div>
+      <div>
+        <label className="label">Description</label>
+        <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" />
+      </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <label className="label">Status</label>
+          <select className="input" value={status} onChange={(e) => setStatus(e.target.value as ProjectStatus)}>
+            <option value="PLANNING">Planning</option>
+            <option value="ACTIVE">Active</option>
+            <option value="CLOSED">Closed</option>
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="label">Start date</label>
+          <input className="input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="label">End date</label>
+          <input className="input" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={startDate || undefined} />
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button type="submit" className="btn btn-primary" disabled={submitting}>
+          {submitting ? "Saving…" : "Save changes"}
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function SprintRow({ projectId, sprint }: { projectId: string; sprint: Sprint }) {
+  return (
+    <Link
+      href={`/projects/${projectId}/sprints/${sprint.id}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        padding: "12px 16px",
+        borderBottom: "1px solid var(--border)",
+        color: "inherit",
+        textDecoration: "none",
+        cursor: "pointer",
+      }}
+      className="sprint-row"
+    >
       <StatusBadge status={sprint.status} />
       <span style={{ fontSize: 13.5, fontWeight: 500, flex: 1 }}>{sprint.name}</span>
       <span className="mono" style={{ fontSize: 12, color: "var(--text-faint)" }}>
         {fmtDate(sprint.start_date)} – {fmtDate(sprint.end_date)}
       </span>
-    </div>
+    </Link>
   );
 }
 
@@ -126,11 +238,21 @@ function NewSprintForm({ projectId, onCreated }: { projectId: string; onCreated:
 }
 
 function AddMemberForm({ projectId }: { projectId: string }) {
+  const [users, setUsers] = useState<User[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState<"MEMBER" | "MANAGER">("MEMBER");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    usersApi
+      .list({ page_size: 200, sort_by: "full_name" })
+      .then((res) => setUsers(res.items))
+      .catch(() => setUsers([]))
+      .finally(() => setUsersLoading(false));
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -139,7 +261,8 @@ function AddMemberForm({ projectId }: { projectId: string }) {
     setSubmitting(true);
     try {
       await projectsApi.addMember(projectId, userId, role);
-      setSuccess("Member added.");
+      const added = users.find((u) => u.id === userId);
+      setSuccess(added ? `${added.full_name} added.` : "Member added.");
       setUserId("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to add member.");
@@ -157,8 +280,23 @@ function AddMemberForm({ projectId }: { projectId: string }) {
       )}
       {success && <div style={{ width: "100%", fontSize: 12.5, color: "var(--green)" }}>{success}</div>}
       <div style={{ flex: "1 1 220px" }}>
-        <label className="label">User ID</label>
-        <input className="input mono" value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="user UUID" required />
+        <label className="label">Member</label>
+        <select
+          className="input"
+          value={userId}
+          onChange={(e) => setUserId(e.target.value)}
+          required
+          disabled={usersLoading}
+        >
+          <option value="" disabled>
+            {usersLoading ? "Loading users…" : "Select a person"}
+          </option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.full_name} ({u.email})
+            </option>
+          ))}
+        </select>
       </div>
       <div>
         <label className="label">Role</label>
@@ -167,7 +305,7 @@ function AddMemberForm({ projectId }: { projectId: string }) {
           <option value="MANAGER">Manager</option>
         </select>
       </div>
-      <button type="submit" className="btn btn-primary" disabled={submitting}>
+      <button type="submit" className="btn btn-primary" disabled={submitting || usersLoading}>
         {submitting ? "Adding…" : "Add member"}
       </button>
     </form>
@@ -182,6 +320,7 @@ export default function ProjectsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [showNewProject, setShowNewProject] = useState(false);
+  const [editingProject, setEditingProject] = useState(false);
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [sprintsLoading, setSprintsLoading] = useState(false);
 
@@ -220,6 +359,11 @@ export default function ProjectsPage() {
       .then(setSprints)
       .catch(() => setSprints([]))
       .finally(() => setSprintsLoading(false));
+  }, [selectedId]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- closes any open edit form when the selection changes
+    setEditingProject(false);
   }, [selectedId]);
 
   const selected = projects.find((p) => p.id === selectedId) || null;
@@ -298,24 +442,40 @@ export default function ProjectsPage() {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-              <div className="card" style={{ padding: 20 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span className="mono" style={{ fontSize: 12, color: "var(--text-faint)" }}>{selected.code}</span>
-                    <StatusBadge status={selected.status} />
+              {editingProject ? (
+                <EditProjectForm
+                  project={selected}
+                  onSaved={(p) => {
+                    setProjects((prev) => prev.map((existing) => (existing.id === p.id ? p : existing)));
+                    setEditingProject(false);
+                  }}
+                  onCancel={() => setEditingProject(false)}
+                />
+              ) : (
+                <div className="card" style={{ padding: 20 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span className="mono" style={{ fontSize: 12, color: "var(--text-faint)" }}>{selected.code}</span>
+                      <StatusBadge status={selected.status} />
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button type="button" className="btn btn-secondary" onClick={() => setEditingProject(true)}>
+                        Edit
+                      </button>
+                      <Link href={`/projects/${selected.id}/board`} className="btn btn-secondary">
+                        Open board
+                      </Link>
+                    </div>
                   </div>
-                  <Link href={`/projects/${selected.id}/board`} className="btn btn-secondary">
-                    Open board
-                  </Link>
+                  <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>{selected.name}</div>
+                  <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 10 }}>
+                    {selected.description || "No description."}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-faint)" }}>
+                    {fmtDate(selected.start_date)} – {fmtDate(selected.end_date)}
+                  </div>
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>{selected.name}</div>
-                <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 10 }}>
-                  {selected.description || "No description."}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-faint)" }}>
-                  {fmtDate(selected.start_date)} – {fmtDate(selected.end_date)}
-                </div>
-              </div>
+              )}
 
               <div className="card">
                 <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", fontSize: 14, fontWeight: 600 }}>
@@ -326,7 +486,7 @@ export default function ProjectsPage() {
                 ) : sprints.length === 0 ? (
                   <div style={{ padding: 20, fontSize: 13, color: "var(--text-muted)" }}>No sprints yet.</div>
                 ) : (
-                  sprints.map((s) => <SprintRow key={s.id} sprint={s} />)
+                  sprints.map((s) => <SprintRow key={s.id} projectId={selected.id} sprint={s} />)
                 )}
                 <NewSprintForm projectId={selected.id} onCreated={(s) => setSprints((prev) => [...prev, s])} />
               </div>
