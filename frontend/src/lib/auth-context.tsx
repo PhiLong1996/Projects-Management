@@ -13,6 +13,10 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  // Patches the current user in-place (localStorage + React state) —
+  // used after a profile edit so the sidebar/name update without forcing
+  // a re-login.
+  updateUser: (patch: Partial<TokenUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -57,6 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const updateUser = useCallback((patch: Partial<TokenUser>) => {
+    const updated = tokenStore.updateUser(patch);
+    if (updated) setUser(updated);
+  }, []);
+
   const logout = useCallback(async () => {
     const refreshToken = tokenStore.getRefreshToken();
     tokenStore.clear();
@@ -71,7 +80,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push("/login");
   }, [router]);
 
-  return <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ user, loading, login, logout, updateUser }}>{children}</AuthContext.Provider>
+  );
 }
 
 export function useAuth(): AuthContextValue {

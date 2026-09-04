@@ -135,6 +135,23 @@ export function ErrorBanner({ message }: { message: string }) {
   );
 }
 
+export function SuccessBanner({ message }: { message: string }) {
+  return (
+    <div
+      className="card"
+      style={{
+        padding: "10px 14px",
+        background: "var(--green-subtle)",
+        borderColor: "var(--green-subtle)",
+        color: "var(--green)",
+        fontSize: 13,
+      }}
+    >
+      {message}
+    </div>
+  );
+}
+
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: subtitle ? 4 : 20 }}>

@@ -41,6 +41,17 @@ export const tokenStore = {
     if (!isBrowser()) return;
     window.localStorage.setItem(ACCESS_KEY, accessToken);
   },
+  // Patches the cached user (e.g. after a profile edit) so the UI reflects
+  // the change immediately without a full re-login. Returns the merged
+  // user so callers (auth-context) can push it into React state too.
+  updateUser(patch: Partial<TokenUser>): TokenUser | null {
+    if (!isBrowser()) return null;
+    const current = tokenStore.getUser();
+    if (!current) return null;
+    const updated = { ...current, ...patch };
+    window.localStorage.setItem(USER_KEY, JSON.stringify(updated));
+    return updated;
+  },
   clear() {
     if (!isBrowser()) return;
     window.localStorage.removeItem(ACCESS_KEY);

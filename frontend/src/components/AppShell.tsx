@@ -6,9 +6,9 @@ import { useAuth } from "@/lib/auth-context";
 import { notificationsApi } from "@/lib/endpoints";
 import { useNotificationsSocket } from "@/lib/use-notifications-socket";
 import { Avatar } from "./ui";
-import { AdminIcon, BellIcon, BoardIcon, DashboardIcon, LogoMark, ProjectsIcon, SprintIcon, TaskIcon } from "./icons";
+import { AdminIcon, BellIcon, BoardIcon, DashboardIcon, LogoMark, ProjectsIcon, SprintIcon, TaskIcon, UserIcon } from "./icons";
 
-type NavKey = "dashboard" | "board" | "projects" | "sprints" | "tasks" | "notifications" | "admin";
+type NavKey = "dashboard" | "board" | "projects" | "sprints" | "tasks" | "notifications" | "admin" | "profile";
 
 function NavItem({ href, icon, label, active, badge }: { href: string; icon: ReactNode; label: string; active: boolean; badge?: number }) {
   return (
@@ -139,6 +139,23 @@ export function AppShell({ active, children }: { active: NavKey; children: React
               className="card"
               style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, right: 0, padding: 6, zIndex: 10 }}
             >
+              <Link
+                href="/profile"
+                onClick={() => setMenuOpen(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  fontSize: 13,
+                  color: active === "profile" ? "var(--accent-subtle-text)" : "var(--text)",
+                  background: active === "profile" ? "var(--accent-subtle)" : "transparent",
+                }}
+              >
+                <UserIcon />
+                Profile
+              </Link>
               <button
                 onClick={logout}
                 style={{

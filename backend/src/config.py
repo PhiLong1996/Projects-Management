@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
-    smtp_from: str = ""  # defaults to smtp_user if unset
+    smtp_from: str = "admin@example.com"  # defaults to smtp_user if unset
     smtp_use_tls: bool = True
     # Used to build the password-reset link emailed to the user
     # (<frontend_url>/reset-password?token=...). Point this at wherever the

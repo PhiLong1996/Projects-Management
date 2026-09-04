@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { LogoMark } from "@/components/icons";
-import { ErrorBanner } from "@/components/ui";
+import { CenteredSpinner, ErrorBanner, SuccessBanner } from "@/components/ui";
 
-export default function LoginPage() {
+function LoginForm() {
   const { user, login } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Set by /reset-password and by the profile page's "change password"
+  // flow (which signs the user out, since the backend revokes every
+  // session on a password change) — a one-line heads-up on where they
+  // landed and why.
+  const notice = searchParams.get("notice");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +86,11 @@ export default function LoginPage() {
             Sign in with your workspace account.
           </div>
 
+          {notice && (
+            <div style={{ marginBottom: 16 }}>
+              <SuccessBanner message={notice} />
+            </div>
+          )}
           {error && (
             <div style={{ marginBottom: 16 }}>
               <ErrorBanner message={error} />
@@ -99,25 +112,44 @@ export default function LoginPage() {
               autoFocus
             />
           </div>
-          <div style={{ marginBottom: 22 }}>
-            <label className="label" htmlFor="password">
-              Password
-            </label>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <label className="label" htmlFor="password" style={{ marginBottom: 0 }}>
+                Password
+              </label>
+              <Link href="/forgot-password" style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
+                Forgot password?
+              </Link>
+            </div>
             <input
               id="password"
               type="password"
               className="input"
+              style={{ marginTop: 6 }}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
             />
           </div>
-          <button type="submit" className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }} disabled={submitting}>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ width: "100%", justifyContent: "center", marginTop: 10 }}
+            disabled={submitting}
+          >
             {submitting ? "Signing in…" : "Sign in"}
           </button>
         </form>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<CenteredSpinner />}>
+      <LoginForm />
+    </Suspense>
   );
 }
