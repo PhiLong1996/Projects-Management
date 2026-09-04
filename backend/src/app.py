@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.config import get_settings
 from src.database import async_engine, Base
 from src.core.realtime import redis_subscriber_loop
+from src.jobs.check_deadlines import deadline_check_loop
 from src.modules.auth.router import router as auth_router
 from src.modules.projects.router import router as projects_router
 from src.modules.sprints.router import router as sprints_router
@@ -65,15 +66,29 @@ async def lifespan(app: FastAPI):
     # endpoints work regardless of whether realtime delivery is up.
     subscriber_task = asyncio.create_task(redis_subscriber_loop())
 
+    # Background task: periodically scans task due dates and emits
+    # DEADLINE_APPROACHING / TASK_OVERDUE notifications for as long as this
+    # process is running — see deadline_check_loop's docstring in
+    # src/jobs/check_deadlines.py. Replaces needing a separate external cron
+    # entry; `python -m src.jobs.check_deadlines` still works standalone
+    # (e.g. to force an immediate check) if you want one anyway.
+    deadline_task = asyncio.create_task(
+        deadline_check_loop(settings.deadline_check_interval_seconds)
+    )
+
     yield
 
-    subscriber_task.cancel()
-    try:
-        await subscriber_task
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        logger.warning("Error while shutting down Redis subscriber task", exc_info=True)
+    for task, task_name in [
+        (subscriber_task, "Redis subscriber"),
+        (deadline_task, "deadline check"),
+    ]:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.warning("Error while shutting down %s task", task_name, exc_info=True)
 
     await async_engine.dispose()
 

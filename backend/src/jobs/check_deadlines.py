@@ -5,6 +5,7 @@ Run periodically via cron, e.g.:
     python -m src.jobs.check_deadlines
 """
 import asyncio
+import logging
 from typing import Optional
 from datetime import datetime, timedelta, date
 
@@ -16,6 +17,8 @@ from src.modules.tasks.models import Task, TaskStatus
 from src.modules.projects.models import ProjectMember, ProjectRole
 from src.modules.notifications.models import NotificationType
 from src.modules.notifications.service import create_event_notification
+
+logger = logging.getLogger("jobs.check_deadlines")
 
 
 def _due_date_value(task: Task) -> Optional[date]:
@@ -106,6 +109,31 @@ async def check_deadlines(session: AsyncSession) -> dict:
     await session.commit()
     return stats
 
+
+async def deadline_check_loop(interval_seconds: int) -> None:
+    """Run check_deadlines() forever on a fixed interval, for the lifetime of
+    the app process. Started as a background asyncio task from app.py's
+    lifespan (same pattern as core/realtime.py's redis_subscriber_loop) so
+    DEADLINE_APPROACHING / TASK_OVERDUE notifications get generated
+    automatically whenever the backend web process is running, instead of
+    depending on an external cron entry calling `python -m
+    src.jobs.check_deadlines` separately.
+
+    A failed run (e.g. a transient DB hiccup) is logged and swallowed rather
+    than crashing the loop / the app — the next scheduled run just tries
+    again. CancelledError (from task.cancel() on shutdown) is re-raised so
+    the loop actually stops instead of retrying forever.
+    """
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                stats = await check_deadlines(session)
+                logger.info("Deadline check complete: %s", stats)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Deadline check run failed; will retry next interval", exc_info=True)
+        await asyncio.sleep(interval_seconds)
 
 async def main():
     async with AsyncSessionLocal() as session:

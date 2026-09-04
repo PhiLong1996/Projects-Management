@@ -42,3 +42,6 @@ Thumbs.db
 
 # --- Logs ---
 *.log
+
+# --- Claude desktop app: local mirror of files sent during a chat ---
+Claude outputs/

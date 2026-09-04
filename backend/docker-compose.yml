@@ -49,8 +49,8 @@ services:
     # emails without a real mail provider account.
     image: axllent/mailpit:latest
     ports:
-      - "8025:8025"  # web UI — view captured emails here
-      - "1025:1025"  # SMTP — also reachable as localhost:1025 outside Docker
+      - "8025:8025" # web UI — view captured emails here
+      - "1025:1025" # SMTP — also reachable as localhost:1025 outside Docker
 
   redis:
     # Fan-out layer for realtime notification delivery: every `web`
@@ -73,7 +73,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
       timeout: 5s
       retries: 10

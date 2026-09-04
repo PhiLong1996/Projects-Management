@@ -49,6 +49,15 @@ class Settings(BaseSettings):
     # core feature" pattern as the SMTP send in forgot-password.
     redis_url: str = "redis://localhost:6379/0"
 
+    # --- Deadline check job ---
+    # How often (seconds) the in-process background loop (see
+    # src/jobs/check_deadlines.py's deadline_check_loop, started from
+    # app.py's lifespan) re-scans tasks for DEADLINE_APPROACHING /
+    # TASK_OVERDUE. Notifications are deduplicated via `deduplication_key`,
+    # so a shorter interval just means events are noticed sooner — it does
+    # not create duplicate notifications. Default: 900s (15 minutes).
+    deadline_check_interval_seconds: int = 900
+
     max_file_size_bytes: int = 10 * 1024 * 1024
 
     allowed_mime_types: Set[str] = {

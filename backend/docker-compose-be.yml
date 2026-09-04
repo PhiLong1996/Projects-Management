@@ -1,0 +1,41 @@
+services:
+
+  mailpit:
+    # Self-hosted, no-auth dev SMTP relay: accepts any mail on 1025 with no
+    # login required, and shows what was "sent" in a web UI on 8025
+    # (http://localhost:8025) instead of actually delivering anywhere.
+    # Nothing leaves your machine — ideal for testing forgot-password
+    # emails without a real mail provider account.
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025" # web UI — view captured emails here
+      - "1025:1025" # SMTP — also reachable as localhost:1025 outside Docker
+
+  redis:
+    # Fan-out layer for realtime notification delivery: every `web`
+    # instance publishes new notifications here and subscribes to hear
+    # about ones published by the others, so a WebSocket connected to any
+    # one instance still gets pushed to (see src/core/realtime.py). Not
+    # used for anything else (no caching, no Celery/task-queue use here).
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=taskdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

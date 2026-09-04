@@ -312,16 +312,25 @@ fall back to some default. `page_size` is capped at 100.
 ## 10. Notifications
 
 Triggered on task assignment/reassignment, status changes, priority/due-date
-updates, new comments, and project member additions. `src/jobs/check_deadlines.py`
-should be run periodically (e.g. via cron, every 15–30 minutes) to emit
-`DEADLINE_APPROACHING` (due within 24h) and `TASK_OVERDUE` notifications:
+updates, new comments, and project member additions.
+
+`src/jobs/check_deadlines.py` also runs automatically in-process: `app.py`'s
+lifespan starts `deadline_check_loop()` as a background asyncio task
+alongside the Redis subscriber, so as long as the backend `web` process is
+running, tasks get rescanned every `DEADLINE_CHECK_INTERVAL_SECONDS`
+(default 900s / 15 minutes; set in `.env`) and `DEADLINE_APPROACHING` (due
+within 24h) / `TASK_OVERDUE` notifications get emitted — no external cron
+needed. You can still invoke a single check manually (e.g. to force one
+immediately, or from an external scheduler if you'd rather not run it
+in-process):
 
 ```bash
 python -m src.jobs.check_deadlines
 ```
 
-Notifications are deduplicated via `deduplication_key`, so re-running the job
-does not create duplicate entries.
+Notifications are deduplicated via `deduplication_key`, so re-running the
+job (in-process on its interval, or manually) never creates duplicate
+entries.
 
 ### Realtime delivery (WebSocket + Redis)
 
