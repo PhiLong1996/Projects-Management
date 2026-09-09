@@ -20,22 +20,31 @@ function isOverdue(task: Task): boolean {
   return !!task.due_date && task.status !== "DONE" && task.status !== "CANCELLED" && new Date(task.due_date).getTime() < Date.now();
 }
 
-function TaskCard({ task, assignee, onDragStart }: { task: Task; assignee?: User; onDragStart: (e: React.DragEvent, taskId: string) => void }) {
+function TaskCard({
+  projectId,
+  task,
+  assignee,
+  onDragStart,
+}: {
+  projectId: string;
+  task: Task;
+  assignee?: User;
+  onDragStart: (e: React.DragEvent, taskId: string) => void;
+}) {
+  // The card IS the link (rather than a draggable div with a separate
+  // absolutely-positioned Link on top for navigation) — an overlay on top
+  // of a draggable element intercepts the drag gesture before it ever
+  // reaches the card underneath (anchors are natively draggable too, so
+  // the browser would start dragging the link instead), which made cards
+  // stick instead of dragging between columns.
   return (
-    <div
+    <Link
+      href={`/projects/${projectId}/tasks/${task.id}`}
       draggable
       onDragStart={(e) => onDragStart(e, task.id)}
       className="card"
-      style={{ padding: 12, cursor: "grab", color: "var(--text)" }}
+      style={{ display: "block", padding: 12, cursor: "grab", color: "var(--text)", textDecoration: "none" }}
     >
-      <TaskCardInner task={task} assignee={assignee} />
-    </div>
-  );
-}
-
-function TaskCardInner({ task, assignee }: { task: Task; assignee?: User }) {
-  return (
-    <>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <span className="mono" style={{ fontSize: 10.5, color: "var(--text-faint)" }}>
           {task.id.slice(0, 8)}
@@ -53,7 +62,7 @@ function TaskCardInner({ task, assignee }: { task: Task; assignee?: User }) {
         )}
         {assignee && <Avatar name={assignee.full_name} size={22} />}
       </div>
-    </>
+    </Link>
   );
 }
 
@@ -255,14 +264,16 @@ export default function BoardPage({ params }: { params: Promise<{ projectId: str
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {colTasks.map((t) => (
-                  <div key={t.id} style={{ position: "relative" }}>
-                    <TaskCard task={t} assignee={t.assignee_id ? usersById.get(t.assignee_id) : undefined} onDragStart={(e, id) => { e.dataTransfer.effectAllowed = "move"; setDragTaskId(id); }} />
-                    <Link
-                      href={`/projects/${projectId}/tasks/${t.id}`}
-                      style={{ position: "absolute", inset: 0, zIndex: 1 }}
-                      aria-label={t.title}
-                    />
-                  </div>
+                  <TaskCard
+                    key={t.id}
+                    projectId={projectId}
+                    task={t}
+                    assignee={t.assignee_id ? usersById.get(t.assignee_id) : undefined}
+                    onDragStart={(e, id) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      setDragTaskId(id);
+                    }}
+                  />
                 ))}
               </div>
             </div>

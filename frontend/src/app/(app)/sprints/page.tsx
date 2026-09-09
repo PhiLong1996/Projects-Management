@@ -131,6 +131,7 @@ export default function SprintsPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<SprintStatus | "ALL">("ALL");
+  const [projectFilter, setProjectFilter] = useState<string>("ALL");
   const [showCreate, setShowCreate] = useState(false);
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
 
@@ -160,6 +161,7 @@ export default function SprintsPage() {
     const q = search.trim().toLowerCase();
     return rows
       .filter((r) => statusFilter === "ALL" || r.sprint.status === statusFilter)
+      .filter((r) => projectFilter === "ALL" || r.project.id === projectFilter)
       .filter(
         (r) =>
           !q ||
@@ -172,16 +174,17 @@ export default function SprintsPage() {
         if (byStatus !== 0) return byStatus;
         return new Date(b.sprint.start_date).getTime() - new Date(a.sprint.start_date).getTime();
       });
-  }, [rows, search, statusFilter]);
+  }, [rows, search, statusFilter, projectFilter]);
 
   function handleSaved(sprint: Sprint, project: Project) {
     setRows((prev) => [{ project, sprint }, ...prev]);
     setShowCreate(false);
 
-    // A new sprint starts out PLANNED — the current status filter or search
-    // may hide it from the list that was just updated, which reads as "it
-    // didn't get created". Relax only what would actually hide it.
+    // A new sprint starts out PLANNED — the current status/project filter or
+    // search may hide it from the list that was just updated, which reads as
+    // "it didn't get created". Relax only what would actually hide it.
     if (statusFilter !== "ALL" && statusFilter !== sprint.status) setStatusFilter("ALL");
+    if (projectFilter !== "ALL" && projectFilter !== project.id) setProjectFilter("ALL");
     if (search.trim() && !sprint.name.toLowerCase().includes(search.trim().toLowerCase())) setSearch("");
     setJustCreatedId(sprint.id);
     window.setTimeout(() => setJustCreatedId((id) => (id === sprint.id ? null : id)), 3000);
@@ -221,6 +224,19 @@ export default function SprintsPage() {
               style={{ border: "none", outline: "none", flex: 1, fontSize: 13, background: "transparent" }}
             />
           </div>
+          <select
+            className="input"
+            style={{ width: 200, flexShrink: 0 }}
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+          >
+            <option value="ALL">All projects</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.code} — {p.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

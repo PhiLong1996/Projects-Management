@@ -40,12 +40,19 @@ function TaskCard({
   onDragStart: (e: React.DragEvent, taskId: string) => void;
 }) {
   const { task, project } = row;
+  // The card IS the link (rather than a draggable div with a separate
+  // absolutely-positioned Link on top for navigation) — an overlay on top
+  // of a draggable element intercepts the drag gesture before it ever
+  // reaches the card underneath (anchors are natively draggable too, so
+  // the browser would start dragging the link instead), which made cards
+  // stick instead of dragging between columns.
   return (
-    <div
+    <Link
+      href={`/projects/${project.id}/tasks/${task.id}`}
       draggable
       onDragStart={(e) => onDragStart(e, task.id)}
       className="card"
-      style={{ padding: 12, cursor: "grab", color: "var(--text)" }}
+      style={{ display: "block", padding: 12, cursor: "grab", color: "var(--text)", textDecoration: "none" }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         {showProjectBadge ? (
@@ -70,7 +77,7 @@ function TaskCard({
         )}
         {assignee && <Avatar name={assignee.full_name} size={22} />}
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -344,22 +351,16 @@ export default function BoardPage() {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {colRows.map((row) => (
-                    <div key={row.task.id} style={{ position: "relative" }}>
-                      <TaskCard
-                        row={row}
-                        showProjectBadge={selected === ALL_PROJECTS}
-                        assignee={row.task.assignee_id ? usersById.get(row.task.assignee_id) : undefined}
-                        onDragStart={(e, id) => {
-                          e.dataTransfer.effectAllowed = "move";
-                          setDragTaskId(id);
-                        }}
-                      />
-                      <Link
-                        href={`/projects/${row.project.id}/tasks/${row.task.id}`}
-                        style={{ position: "absolute", inset: 0, zIndex: 1 }}
-                        aria-label={row.task.title}
-                      />
-                    </div>
+                    <TaskCard
+                      key={row.task.id}
+                      row={row}
+                      showProjectBadge={selected === ALL_PROJECTS}
+                      assignee={row.task.assignee_id ? usersById.get(row.task.assignee_id) : undefined}
+                      onDragStart={(e, id) => {
+                        e.dataTransfer.effectAllowed = "move";
+                        setDragTaskId(id);
+                      }}
+                    />
                   ))}
                 </div>
               </div>
