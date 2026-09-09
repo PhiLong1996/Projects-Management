@@ -339,9 +339,11 @@ export default function TasksPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "ALL">("ALL");
+  const [projectFilter, setProjectFilter] = useState<string>("ALL");
   const [onlyMine, setOnlyMine] = useState(true);
   const [formMode, setFormMode] = useState<"closed" | "create" | "edit">("closed");
   const [editingRow, setEditingRow] = useState<Row | null>(null);
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resets loading/error state before the fetch starts
@@ -375,6 +377,7 @@ export default function TasksPage() {
     const q = search.trim().toLowerCase();
     return rows
       .filter((r) => statusFilter === "ALL" || r.task.status === statusFilter)
+      .filter((r) => projectFilter === "ALL" || r.project.id === projectFilter)
       .filter((r) => !onlyMine || r.task.assignee_id === user?.id)
       .filter(
         (r) =>
@@ -390,7 +393,7 @@ export default function TasksPage() {
         if (!b.task.due_date) return -1;
         return new Date(a.task.due_date).getTime() - new Date(b.task.due_date).getTime();
       });
-  }, [rows, search, statusFilter, onlyMine, user?.id]);
+  }, [rows, search, statusFilter, projectFilter, onlyMine, user?.id]);
 
   function openCreate() {
     setEditingRow(null);
@@ -408,12 +411,27 @@ export default function TasksPage() {
   }
 
   function handleSaved(task: Task, project: Project) {
+    const wasCreate = formMode === "create";
     setRows((prev) => {
       const exists = prev.some((r) => r.task.id === task.id);
       if (exists) return prev.map((r) => (r.task.id === task.id ? { project, task } : r));
       return [{ project, task }, ...prev];
     });
     closeForm();
+
+    if (wasCreate) {
+      // A new task is created with whatever status/project/assignee was
+      // picked in the form — the current filters may well hide it (most
+      // commonly "My tasks" when it wasn't assigned to the creator), which
+      // reads as "it didn't get created". Relax only the filters that
+      // would actually hide it, so it's guaranteed visible right away.
+      if (statusFilter !== "ALL" && statusFilter !== task.status) setStatusFilter("ALL");
+      if (projectFilter !== "ALL" && projectFilter !== project.id) setProjectFilter("ALL");
+      if (onlyMine && task.assignee_id !== user?.id) setOnlyMine(false);
+      if (search.trim() && !task.title.toLowerCase().includes(search.trim().toLowerCase())) setSearch("");
+      setJustCreatedId(task.id);
+      window.setTimeout(() => setJustCreatedId((id) => (id === task.id ? null : id)), 3000);
+    }
   }
 
   return (
@@ -446,32 +464,50 @@ export default function TasksPage() {
         />
       )}
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-        <div className="input" style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 260px" }}>
-          <SearchIcon style={{ color: "var(--text-faint)" }} />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search tasks or projects…"
-            style={{ border: "none", outline: "none", flex: 1, fontSize: 13, background: "transparent" }}
-          />
-        </div>
-        <button type="button" className={onlyMine ? "btn btn-primary" : "btn btn-secondary"} onClick={() => setOnlyMine((v) => !v)}>
-          {onlyMine ? "My tasks" : "All tasks"}
-        </button>
-      </div>
-
-      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-        {STATUS_FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            onClick={() => setStatusFilter(f.key)}
-            className={statusFilter === f.key ? "btn btn-primary" : "btn btn-secondary"}
+      {/* Search/filter toolbar — a distinct bordered panel, set apart from
+          the "New task" action above (which lives in the page header) so
+          the two don't read as one continuous control strip. */}
+      <div className="card" style={{ padding: 14, marginTop: formMode === "closed" ? 24 : 0, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+          <div className="input" style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 240px" }}>
+            <SearchIcon style={{ color: "var(--text-faint)" }} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search tasks or projects…"
+              style={{ border: "none", outline: "none", flex: 1, fontSize: 13, background: "transparent" }}
+            />
+          </div>
+          <select
+            className="input"
+            style={{ width: 200, flexShrink: 0 }}
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
           >
-            {f.label}
+            <option value="ALL">All projects</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.code} — {p.name}
+              </option>
+            ))}
+          </select>
+          <button type="button" className={onlyMine ? "btn btn-primary" : "btn btn-secondary"} onClick={() => setOnlyMine((v) => !v)}>
+            {onlyMine ? "My tasks" : "All tasks"}
           </button>
-        ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setStatusFilter(f.key)}
+              className={statusFilter === f.key ? "btn btn-primary" : "btn btn-secondary"}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {loading ? (
@@ -484,6 +520,7 @@ export default function TasksPage() {
         <div className="card">
           {filtered.map(({ project, task }) => {
             const assignee = task.assignee_id ? usersById.get(task.assignee_id) : undefined;
+            const isNew = task.id === justCreatedId;
             return (
               <div key={task.id} style={{ position: "relative" }}>
                 <Link href={`/projects/${project.id}/tasks/${task.id}`} style={{ position: "absolute", inset: 0 }} aria-label={task.title} />
@@ -494,6 +531,8 @@ export default function TasksPage() {
                     gap: 12,
                     padding: "12px 16px",
                     borderBottom: "1px solid var(--border)",
+                    background: isNew ? "var(--accent-subtle)" : "transparent",
+                    transition: "background 0.6s ease",
                   }}
                 >
                   <span className="mono" style={{ fontSize: 11.5, color: "var(--text-faint)", width: 90, flexShrink: 0 }}>
