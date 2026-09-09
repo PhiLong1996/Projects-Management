@@ -1,9 +1,9 @@
 services:
   web:
     build: .
-    command: uvicorn src.app:app --host 0.0.0.0 --port 8000 --reload --proxy-headers --forwarded-allow-ips='*'
+    command: uvicorn src.app:app --host 0.0.0.0 --port 8001 --reload --proxy-headers --forwarded-allow-ips='*'
     expose:
-      - "8000"
+      - "8001"
     env_file:
       - .env
     environment:
