@@ -1,6 +1,10 @@
-# Dev-oriented image: runs `next dev` with the source bind-mounted by
-# docker-compose.yml for hot reload, rather than a production build. See
-# README.md for a production deployment note.
+# Production image: builds the app at image-build time and serves the
+# built output with `next start`. No bind mount / volume for the source
+# or `.next` — this isn't `next dev`, so nothing benefits from one, and a
+# stale `.next` (or node_modules) volume from an earlier failed build
+# will silently shadow a later successful build's output. If you want a
+# hot-reload dev container instead, use a separate Dockerfile/compose
+# override that runs `npm run dev` with the source bind-mounted.
 FROM node:22-alpine
 
 WORKDIR /app
