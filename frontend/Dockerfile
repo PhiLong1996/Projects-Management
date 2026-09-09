@@ -11,6 +11,12 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+
+# Accept environment variables at build time
+ARG NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+
+# Build the Next.js app with the variable baked in
 RUN npm run build
 
 EXPOSE 3000
