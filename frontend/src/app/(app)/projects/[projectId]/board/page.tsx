@@ -5,8 +5,8 @@ import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Avatar, CenteredSpinner, ErrorBanner, PageHeader, PriorityBadge } from "@/components/ui";
 import { PlusIcon } from "@/components/icons";
-import { projectsApi, tasksApi, usersApi } from "@/lib/endpoints";
-import type { Project, Task, TaskPriority, TaskStatus, User } from "@/lib/types";
+import { projectsApi, sprintsApi, tasksApi, usersApi } from "@/lib/endpoints";
+import type { Project, Sprint, Task, TaskPriority, TaskStatus, User } from "@/lib/types";
 import { ApiError } from "@/lib/api";
 
 const COLUMNS: { key: TaskStatus; label: string; color: string }[] = [
@@ -62,9 +62,15 @@ function NewTaskForm({ projectId, users, onCreated, onCancel }: { projectId: str
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("MEDIUM");
   const [assigneeId, setAssigneeId] = useState("");
+  const [sprintId, setSprintId] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [sprints, setSprints] = useState<Sprint[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    sprintsApi.list(projectId).then(setSprints).catch(() => setSprints([]));
+  }, [projectId]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -75,6 +81,7 @@ function NewTaskForm({ projectId, users, onCreated, onCancel }: { projectId: str
         title,
         description: description || undefined,
         priority,
+        sprint_id: sprintId || undefined,
         assignee_id: assigneeId || undefined,
         due_date: dueDate ? new Date(dueDate).toISOString() : undefined,
       });
@@ -105,6 +112,17 @@ function NewTaskForm({ projectId, users, onCreated, onCancel }: { projectId: str
             <option value="MEDIUM">Medium</option>
             <option value="HIGH">High</option>
             <option value="CRITICAL">Critical</option>
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className="label">Sprint</label>
+          <select className="input" value={sprintId} onChange={(e) => setSprintId(e.target.value)}>
+            <option value="">Backlog</option>
+            {sprints.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
           </select>
         </div>
         <div style={{ flex: 1 }}>
