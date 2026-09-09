@@ -491,9 +491,15 @@ export default function TasksPage() {
               </option>
             ))}
           </select>
-          <button type="button" className={onlyMine ? "btn btn-primary" : "btn btn-secondary"} onClick={() => setOnlyMine((v) => !v)}>
-            {onlyMine ? "My tasks" : "All tasks"}
-          </button>
+          <select
+            className="input"
+            style={{ width: 140, flexShrink: 0 }}
+            value={onlyMine ? "MINE" : "ALL"}
+            onChange={(e) => setOnlyMine(e.target.value === "MINE")}
+          >
+            <option value="MINE">My tasks</option>
+            <option value="ALL">All tasks</option>
+          </select>
         </div>
 
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
